@@ -38,15 +38,27 @@ describe("buildContextIndex", () => {
     expect(index.collisions).toEqual([{ key: "shared", scsNames: ["otherProfile", "profile"] }]);
   });
 
-  test("does not treat one SCS declaring the same key on repeat manifests as a collision", () => {
-    const index = buildContextIndex([entry("profile", ["profile"], "http://a.local")]);
+  test("does not treat duplicate keys within a single SCS's publishesContext as a collision", () => {
+    const index = buildContextIndex([entry("profile", ["shared", "shared"])]);
+    expect(index.owners.get("shared")).toBe("profile");
     expect(index.collisions).toEqual([]);
-    expect(index.owners.get("profile")).toBe("profile");
   });
 
   test("skips an SCS with no manifest (never successfully fetched)", () => {
     const index = buildContextIndex([unreachableEntry("http://broken.local")]);
     expect(index.owners.size).toBe(0);
+    expect(index.collisions).toEqual([]);
+  });
+
+  test("includes a stale SCS's last-known-good context keys", () => {
+    const staleWithManifest: ManifestEntry = {
+      baseUrl: "http://profile.local",
+      manifest: { name: "profile", routes: [], nav: [], publishesContext: ["profile"], consumesContext: [] },
+      stale: true,
+      lastFetchedAt: Date.now() - 3600000,
+    };
+    const index = buildContextIndex([staleWithManifest]);
+    expect(index.owners.get("profile")).toBe("profile");
     expect(index.collisions).toEqual([]);
   });
 
