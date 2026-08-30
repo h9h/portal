@@ -12,7 +12,7 @@ beforeAll(() => {
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === "/token" && req.method === "POST") {
-        const body = await req.json();
+        const body = (await req.json()) as { code?: string };
         if (body.code !== "valid-code") {
           return new Response(JSON.stringify({ error: "bad_verification_code" }), { status: 400 });
         }
@@ -78,7 +78,7 @@ describe("full login flow", () => {
 
     const meResponse = await fetch(`${portal.url}me`, { headers: { Authorization: `Bearer ${accessToken}` } });
     expect(meResponse.status).toBe(200);
-    const me = await meResponse.json();
+    const me = (await meResponse.json()) as { email: string; provider: string; roles: unknown[] };
     expect(me.email).toBe("octocat@example.com");
     expect(me.provider).toBe("fake");
     expect(me.roles).toEqual([]);
@@ -98,9 +98,55 @@ describe("full login flow", () => {
       body: JSON.stringify({ refreshToken }),
     });
     expect(refreshResponse.status).toBe(200);
-    const refreshed = await refreshResponse.json();
+    const refreshed = (await refreshResponse.json()) as { accessToken: string; refreshToken: string };
     expect(refreshed.accessToken).toBeTruthy();
     expect(refreshed.refreshToken).not.toBe(refreshToken);
+  });
+
+  test("a rotated refresh token can itself be used to refresh again", async () => {
+    const { refreshToken } = await loginAndGetTokens();
+
+    const firstRefreshResponse = await fetch(`${portal.url}auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    expect(firstRefreshResponse.status).toBe(200);
+    const firstRefreshed = (await firstRefreshResponse.json()) as { accessToken: string; refreshToken: string };
+
+    const secondRefreshResponse = await fetch(`${portal.url}auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: firstRefreshed.refreshToken }),
+    });
+    expect(secondRefreshResponse.status).toBe(200);
+    const secondRefreshed = (await secondRefreshResponse.json()) as { accessToken: string; refreshToken: string };
+    expect(secondRefreshed.accessToken).toBeTruthy();
+  });
+
+  test("logging out with a rotated refresh token revokes it, and it can no longer refresh", async () => {
+    const { refreshToken } = await loginAndGetTokens();
+
+    const refreshResponse = await fetch(`${portal.url}auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    expect(refreshResponse.status).toBe(200);
+    const refreshed = (await refreshResponse.json()) as { accessToken: string; refreshToken: string };
+
+    await fetch(`${portal.url}auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: refreshed.refreshToken }),
+    });
+
+    const finalRefreshResponse = await fetch(`${portal.url}auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: refreshed.refreshToken }),
+    });
+    expect(finalRefreshResponse.status).toBe(401);
   });
 
   test("logout revokes the refresh token", async () => {
@@ -147,7 +193,7 @@ describe("full login flow", () => {
     // Content-Type text/html).
     expect(callbackResponse.status).toBe(502);
     expect(callbackResponse.headers.get("Content-Type")).toBe("application/json");
-    const body = await callbackResponse.json();
+    const body = (await callbackResponse.json()) as { error: string };
     expect(body.error).toBeTruthy();
   });
 });
