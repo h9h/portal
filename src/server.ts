@@ -14,6 +14,7 @@ export type ServerOptions = {
   providers?: Record<string, OAuthProviderConfig>;
   accessTokenSecret?: string;
   stateSecret?: string;
+  baseUrl?: string;
 };
 
 function json(body: unknown, status = 200): Response {
@@ -36,7 +37,7 @@ function getProvider(providers: Record<string, OAuthProviderConfig>, name: strin
 // source forge valid tokens.
 function resolveSecret(explicit: string | undefined, envVar: string, devDefault: string): string {
   const value = explicit ?? process.env[envVar];
-  if (value !== undefined) return value;
+  if (value) return value;
   if (process.env.NODE_ENV === "production") {
     throw new Error(`${envVar} must be set in production (refusing to boot with the dev default)`);
   }
@@ -49,6 +50,7 @@ export function createServer(opts: ServerOptions = {}) {
   const providers = opts.providers ?? getProviders();
   const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
+  const configuredBaseUrl = opts.baseUrl ?? process.env.PORTAL_BASE_URL;
 
   return Bun.serve({
     port: opts.port ?? 3000,
@@ -64,7 +66,7 @@ export function createServer(opts: ServerOptions = {}) {
         const provider = getProvider(providers, loginMatch[1]);
         if (!provider) return json({ error: "unknown provider" }, 404);
         const state = createState(stateSecret);
-        const redirectUri = `${url.origin}/auth/callback/${loginMatch[1]}`;
+        const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${loginMatch[1]}`;
         return Response.redirect(buildAuthorizeUrl(provider, state, redirectUri), 302);
       }
 
@@ -78,7 +80,7 @@ export function createServer(opts: ServerOptions = {}) {
         if (!code || !state || !verifyState(state, stateSecret)) {
           return json({ error: "invalid state or missing code" }, 400);
         }
-        const redirectUri = `${url.origin}/auth/callback/${providerName}`;
+        const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${providerName}`;
         try {
           const providerAccessToken = await exchangeCodeForToken(provider, code, redirectUri);
           const profile = await fetchUserProfile(provider, providerAccessToken);
@@ -86,7 +88,8 @@ export function createServer(opts: ServerOptions = {}) {
           const accessToken = signAccessToken(user.id, accessTokenSecret);
           const refreshToken = createRefreshToken(db, user.id);
           return json({ accessToken, refreshToken, expiresIn: 900 });
-        } catch {
+        } catch (err) {
+          console.error("oauth callback failed", err);
           return json({ error: "oauth exchange failed" }, 502);
         }
       }
