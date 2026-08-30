@@ -20,7 +20,7 @@ export function getProviders(env: NodeJS.ProcessEnv = process.env): Record<strin
       userInfoUrl: "https://api.github.com/user",
       clientId: env.GITHUB_CLIENT_ID ?? "",
       clientSecret: env.GITHUB_CLIENT_SECRET ?? "",
-      scope: "read:user user:email",
+      scope: "read:user",
       mapProfile: (json: any) => ({
         providerUserId: String(json.id),
         email: json.email ?? null,
