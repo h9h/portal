@@ -1,7 +1,5 @@
-// Static bootstrap page: no per-request data. The /_shell/* URLs below
-// don't exist as real endpoints until a later task adds them (see this
-// plan's Task 9) — this file only needs to produce correct, stable HTML
-// structure; it doesn't need those endpoints to work yet.
+// Static bootstrap page: no per-request data. The /_shell/* URLs below are
+// served by server.ts's asset-serving route (see src/shell/bundle.ts).
 export function renderShellHtml(): string {
   const importMap = {
     imports: {

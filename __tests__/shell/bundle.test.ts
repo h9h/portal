@@ -115,7 +115,13 @@ describe("getShellAssets", () => {
     expect(mod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE).toBeTruthy();
   });
 
-  test("the built react-dom.js bundle exposes createRoot as a real named export", async () => {
+  // Fix-round regression test (final-review re-review): "react-dom" and
+  // "react-dom/client" are genuinely distinct CJS modules in react 19 — the
+  // /client entry point's whole export surface is createRoot/hydrateRoot/
+  // version, nothing else. Both bare specifiers resolve to this one asset
+  // (bootstrap-html.ts), so it must expose the union of both entry points'
+  // real exports, not just /client's.
+  test("the built react-dom.js bundle exposes both react-dom/client's and react-dom's real named exports", async () => {
     const assets = await getShellAssets();
     // react-dom.js imports "react" as an external bare specifier (by
     // design — one shared react.js, not a copy per bundle); resolve it here
@@ -126,7 +132,14 @@ describe("getShellAssets", () => {
     await Bun.write(reactPath, assets.reactJs);
     const patched = assets.reactDomJs.replaceAll(/from\s*["']react["']/g, `from "${new URL(`file://${reactPath}`)}"`);
     const mod = await importFromSource(patched);
+    // react-dom/client's surface
     expect(typeof mod.createRoot).toBe("function");
+    expect(typeof mod.hydrateRoot).toBe("function");
+    // react-dom's own (non-/client) surface — what a spec-conformant SCS
+    // importing from the bare "react-dom" specifier actually needs
+    expect(typeof mod.createPortal).toBe("function");
+    expect(typeof mod.flushSync).toBe("function");
+    expect(typeof mod.unstable_batchedUpdates).toBe("function");
   });
 
   test("repeated calls return the same cached build (do not rebuild every time)", async () => {

@@ -327,17 +327,23 @@ export function createServer(opts: ServerOptions = {}) {
             shell: assets.shellJs,
           };
           const body = byName[shellAssetMatch[1]];
+          // getShellAssets() is memoized for the life of the process (its
+          // output never changes without a redeploy), but there's no
+          // versioned/hashed URL scheme yet — ETag + no-cache forces
+          // revalidation on every request instead of either re-sending
+          // ~500KB of react-dom on every navigation or blind long-term
+          // caching that can't be busted. A matching If-None-Match short-
+          // circuits to a bodyless 304, which is the only part that
+          // actually saves the re-download; the header alone does not.
+          const etag = `"${Bun.hash(body).toString(16)}"`;
+          if (req.headers.get("If-None-Match") === etag) {
+            return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+          }
           return new Response(body, {
             status: 200,
             headers: {
               "Content-Type": "text/javascript; charset=utf-8",
-              // getShellAssets() is memoized for the life of the process
-              // (its output never changes without a redeploy), but there's
-              // no versioned/hashed URL scheme yet — ETag + no-cache forces
-              // revalidation on every request instead of either re-sending
-              // ~500KB of react-dom on every navigation or blind long-term
-              // caching that can't be busted.
-              ETag: `"${Bun.hash(body).toString(16)}"`,
+              ETag: etag,
               "Cache-Control": "no-cache",
             },
           });

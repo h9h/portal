@@ -431,6 +431,23 @@ describe("GET /_shell/*", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-cache");
   });
 
+  // Fix-round regression test (final-review re-review): the ETag header
+  // alone saves nothing if the server never actually checks If-None-Match —
+  // a matching validator must short-circuit to a bodyless 304, not resend
+  // the full asset every time.
+  test("a matching If-None-Match returns a bodyless 304 instead of resending the asset", async () => {
+    const first = await fetch(`${portal.url}_shell/react.js`);
+    const etag = first.headers.get("ETag");
+    expect(etag).toBeTruthy();
+
+    const revalidated = await fetch(`${portal.url}_shell/react.js`, {
+      headers: { "If-None-Match": etag! },
+    });
+    expect(revalidated.status).toBe(304);
+    expect(await revalidated.text()).toBe("");
+    expect(revalidated.headers.get("ETag")).toBe(etag);
+  });
+
   // Fix-round regression test (whole-branch review): the handler used to
   // let a getShellAssets() rejection propagate unhandled out of fetch()
   // instead of returning a clean error response, unlike every other
