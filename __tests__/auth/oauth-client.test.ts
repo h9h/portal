@@ -34,7 +34,7 @@ describe("exchangeCodeForToken", () => {
     const fakeFetch = (async (_input: any, init?: any) => {
       capturedBody = JSON.parse(init.body);
       return new Response(JSON.stringify({ access_token: "fake-access-token" }), { status: 200 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const token = await exchangeCodeForToken(provider, "the-code", "https://portal.example/auth/callback/test-provider", fakeFetch);
 
@@ -45,7 +45,7 @@ describe("exchangeCodeForToken", () => {
 
   test("throws when the response has no access_token", async () => {
     const fakeFetch = (async () =>
-      new Response(JSON.stringify({ error: "bad_verification_code" }), { status: 400 })) as typeof fetch;
+      new Response(JSON.stringify({ error: "bad_verification_code" }), { status: 400 })) as unknown as typeof fetch;
     await expect(exchangeCodeForToken(provider, "bad-code", "https://portal.example/cb", fakeFetch)).rejects.toThrow();
   });
 });
@@ -53,7 +53,7 @@ describe("exchangeCodeForToken", () => {
 describe("fetchUserProfile", () => {
   test("fetches and maps the provider's user profile", async () => {
     const fakeFetch = (async () =>
-      new Response(JSON.stringify({ id: 42, email: "a@example.com", name: "A" }), { status: 200 })) as typeof fetch;
+      new Response(JSON.stringify({ id: 42, email: "a@example.com", name: "A" }), { status: 200 })) as unknown as typeof fetch;
     const profile = await fetchUserProfile(provider, "fake-access-token", fakeFetch);
     expect(profile).toEqual({ providerUserId: "42", email: "a@example.com", displayName: "A" });
   });
