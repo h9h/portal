@@ -463,7 +463,7 @@ describe("end-to-end: a manifest declaring bundle, component, and context fields
     // of what an SCS calls itself — no special-casing needed since ownership
     // is keyed on the declared key string, not on any reserved-name check.
     scsManifest = {
-      name: "orders",
+      name: "portal",
       routes: [],
       nav: [],
       publishesContext: ["profile"],
@@ -471,6 +471,6 @@ describe("end-to-end: a manifest declaring bundle, component, and context fields
     await new Promise((resolve) => setTimeout(resolve, 40));
     const response = await fetch(`${portal.url}routes`, { headers: { Authorization: `Bearer ${accessToken}` } });
     const body = (await response.json()) as { contextOwners: Record<string, string> };
-    expect(body.contextOwners).toEqual({ profile: "orders" });
+    expect(body.contextOwners).toEqual({ profile: "portal" });
   });
 });
