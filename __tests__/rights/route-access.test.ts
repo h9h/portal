@@ -22,7 +22,11 @@ describe("buildRouteIndex", () => {
     const index = buildRouteIndex([
       entry("orders", [{ path: "/orders", requiredRoles: ["orders:viewer"] }]),
     ]);
-    expect(index.routes.get("/orders")).toEqual({ scsName: "orders", requiredRoles: ["orders:viewer"] });
+    expect(index.routes.get("/orders")).toEqual({
+      scsName: "orders",
+      baseUrl: "http://orders.local",
+      requiredRoles: ["orders:viewer"],
+    });
     expect(index.collisions).toEqual([]);
   });
 
@@ -55,7 +59,11 @@ describe("buildRouteIndex", () => {
     const index = buildRouteIndex([
       entry("orders", [{ path: "/orders", requiredRoles: ["orders:viewer"] }], true),
     ]);
-    expect(index.routes.get("/orders")).toEqual({ scsName: "orders", requiredRoles: ["orders:viewer"] });
+    expect(index.routes.get("/orders")).toEqual({
+      scsName: "orders",
+      baseUrl: "http://orders.local",
+      requiredRoles: ["orders:viewer"],
+    });
   });
 
   test("handles an SCS with an empty routes array", () => {
@@ -78,7 +86,11 @@ describe("buildRouteIndex", () => {
       ]),
     ]);
     expect(index.collisions).toEqual([]);
-    expect(index.routes.get("/orders")).toEqual({ scsName: "orders", requiredRoles: ["orders:viewer"] });
+    expect(index.routes.get("/orders")).toEqual({
+      scsName: "orders",
+      baseUrl: "http://orders.local",
+      requiredRoles: ["orders:viewer"],
+    });
   });
 });
 
