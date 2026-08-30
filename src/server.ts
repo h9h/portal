@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createDatabase } from "./db";
-import { findOrCreateUser } from "./auth/users";
+import { findOrCreateUser, findUserById, listUsers } from "./auth/users";
 import { createRefreshToken, revokeRefreshToken, verifyAndRotateRefreshToken } from "./auth/refresh-tokens";
 import { signAccessToken } from "./auth/tokens";
 import { createState, verifyState } from "./auth/state";
@@ -8,7 +8,7 @@ import { getProviders, type OAuthProviderConfig } from "./auth/providers";
 import { buildAuthorizeUrl, exchangeCodeForToken, fetchUserProfile } from "./auth/oauth-client";
 import { getAuthenticatedUserId } from "./auth/middleware";
 import { buildRouteIndex, checkAccess, type RouteIndex } from "./rights/route-access";
-import { assignRole, getUserRoles } from "./rights/roles";
+import { assignRole, getUserRoles, revokeRole } from "./rights/roles";
 import { buildNav } from "./rights/nav";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
@@ -90,6 +90,14 @@ export function createServer(opts: ServerOptions = {}) {
     } catch {
       // never allow a logging failure to propagate into the caller.
     }
+  }
+  // Returns the authenticated caller's userId if they hold portal:admin, or
+  // a Response to return immediately (401 unauthenticated, 403 not an admin).
+  function requireAdmin(req: Request): string | Response {
+    const userId = getAuthenticatedUserId(req, accessTokenSecret);
+    if (!userId) return json({ error: "unauthorized" }, 401);
+    if (!getUserRoles(db, userId).includes("portal:admin")) return json({ error: "forbidden" }, 403);
+    return userId;
   }
   if (manifestRegistry) {
     internalTokenSecret = resolveSecret(
@@ -193,6 +201,39 @@ export function createServer(opts: ServerOptions = {}) {
         // once the refresh completes); acceptable since nav is display-only.
         const nav = manifestRegistry ? buildNav(manifestRegistry.getManifests(), userRoles) : [];
         return json({ nav });
+      }
+
+      if (url.pathname === "/admin/users" && req.method === "GET") {
+        const adminCheck = requireAdmin(req);
+        if (adminCheck instanceof Response) return adminCheck;
+        const users = listUsers(db).map((user) => ({ ...user, roles: getUserRoles(db, user.id) }));
+        return json({ users });
+      }
+
+      const assignRoleMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/roles$/);
+      if (assignRoleMatch && req.method === "POST") {
+        const adminCheck = requireAdmin(req);
+        if (adminCheck instanceof Response) return adminCheck;
+        const targetUserId = assignRoleMatch[1];
+        if (!findUserById(db, targetUserId)) return json({ error: "user not found" }, 404);
+        const body = await req.json().catch(() => null);
+        const role = body && typeof body === "object" ? (body as { role?: unknown }).role : undefined;
+        if (typeof role !== "string" || !role) return json({ error: "missing role" }, 400);
+        assignRole(db, targetUserId, role);
+        return json({ userId: targetUserId, roles: getUserRoles(db, targetUserId) });
+      }
+
+      const revokeRoleMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/roles\/revoke$/);
+      if (revokeRoleMatch && req.method === "POST") {
+        const adminCheck = requireAdmin(req);
+        if (adminCheck instanceof Response) return adminCheck;
+        const targetUserId = revokeRoleMatch[1];
+        if (!findUserById(db, targetUserId)) return json({ error: "user not found" }, 404);
+        const body = await req.json().catch(() => null);
+        const role = body && typeof body === "object" ? (body as { role?: unknown }).role : undefined;
+        if (typeof role !== "string" || !role) return json({ error: "missing role" }, 400);
+        revokeRole(db, targetUserId, role);
+        return json({ userId: targetUserId, roles: getUserRoles(db, targetUserId) });
       }
 
       if (manifestRegistry && req.method === "GET") {
