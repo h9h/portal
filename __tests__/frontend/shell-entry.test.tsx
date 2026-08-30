@@ -45,8 +45,11 @@ async function flush(act: (callback: () => Promise<void>) => Promise<void>, time
 }
 
 describe("shell App", () => {
-  test("shows a login prompt when /me is 401", async () => {
-    const restore = mockFetchSequence([{ path: "/me", status: 401, body: { error: "unauthorized" } }]);
+  test("shows a login prompt with real sign-in links when /me is 401", async () => {
+    const restore = mockFetchSequence([
+      { path: "/me", status: 401, body: { error: "unauthorized" } },
+      { path: "/auth/providers", status: 200, body: [{ name: "github", label: "GitHub" }] },
+    ]);
     const { createRoot } = await import("react-dom/client");
     const { act } = await import("react");
     const { App } = await import("../../src/frontend/shell-entry");
@@ -60,7 +63,75 @@ describe("shell App", () => {
       });
       await flush(act);
 
-      expect(container.textContent).toContain("Please log in");
+      expect(container.textContent).toContain("GitHub");
+      const link = container.querySelector("a") as HTMLAnchorElement | null;
+      expect(link?.getAttribute("href")).toBe("/auth/login/github");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+    }
+  });
+
+  test("a successful-login hash stores tokens, strips the hash, and proceeds to boot as authenticated", async () => {
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(
+      "https://localhost:3000/#access_token=fresh-access&refresh_token=fresh-refresh&expires_in=900"
+    );
+    const restore = mockFetchSequence([
+      { path: "/me", status: 200, body: { id: "u1", roles: [] } },
+      { path: "/routes", status: 200, body: { routes: [], contextOwners: {} } },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+    const { getStoredTokens } = await import("../../src/runtime/auth");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+      await flush(act);
+
+      expect(getStoredTokens()).toEqual({ accessToken: "fresh-access", refreshToken: "fresh-refresh" });
+      expect(window.location.hash).toBe("");
+      expect(container.textContent).toContain("Not found"); // no routes declared in this test's mock
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+      sessionStorage.clear();
+    }
+  });
+
+  test("a failed-login hash shows a login error above the sign-in links, and strips the hash", async () => {
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(
+      "https://localhost:3000/#error=oauth_failed"
+    );
+    const restore = mockFetchSequence([
+      { path: "/me", status: 401, body: { error: "unauthorized" } },
+      { path: "/auth/providers", status: 200, body: [{ name: "github", label: "GitHub" }] },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+      await flush(act);
+
+      expect(container.textContent).toContain("failed");
+      expect(container.textContent).toContain("GitHub");
+      expect(window.location.hash).toBe("");
     } finally {
       await act(async () => {
         root.unmount();
