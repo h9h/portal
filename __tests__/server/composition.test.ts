@@ -369,3 +369,15 @@ describe("GET /_scs/:scsName/bundle.js", () => {
     expect(response.status).toBe(502);
   });
 });
+
+describe("GET /_shell/*", () => {
+  test("serves each asset unauthenticated, with a JS content-type", async () => {
+    for (const name of ["react", "react-dom", "runtime", "shell"]) {
+      const response = await fetch(`${portal.url}_shell/${name}.js`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
+      const body = await response.text();
+      expect(body.length).toBeGreaterThan(0);
+    }
+  });
+});

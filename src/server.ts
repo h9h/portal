@@ -15,6 +15,7 @@ import { buildRouteTable, buildContextOwners } from "./shell/route-table";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
 import { renderShellHtml } from "./shell/bootstrap-html";
+import { getShellAssets } from "./shell/bundle";
 
 export type ServerOptions = {
   port?: number;
@@ -272,6 +273,21 @@ export function createServer(opts: ServerOptions = {}) {
           console.error("bundle fetch failed", err);
           return json({ error: "scs fetch failed" }, 502);
         }
+      }
+
+      const shellAssetMatch = url.pathname.match(/^\/_shell\/(react|react-dom|runtime|shell)\.js$/);
+      if (shellAssetMatch && req.method === "GET") {
+        const assets = await getShellAssets();
+        const byName: Record<string, string> = {
+          react: assets.reactJs,
+          "react-dom": assets.reactDomJs,
+          runtime: assets.runtimeJs,
+          shell: assets.shellJs,
+        };
+        return new Response(byName[shellAssetMatch[1]], {
+          status: 200,
+          headers: { "Content-Type": "text/javascript; charset=utf-8" },
+        });
       }
 
       if (url.pathname === "/admin/users" && req.method === "GET") {
