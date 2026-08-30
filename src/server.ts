@@ -64,6 +64,22 @@ export function createServer(opts: ServerOptions = {}) {
   // task's code didn't exist.
   let internalTokenSecret: string | undefined;
   let routeIndex: RouteIndex = { routes: new Map(), collisions: [] };
+  // Tracks the previously logged collision set (by content) so a persistent
+  // misconfiguration is reported once, not on every refresh. Wrapped so a
+  // logging bug here can never throw and abort the registry's onUpdate
+  // notify loop for other listeners.
+  let lastLoggedCollisions = "";
+  function logCollisionsIfChanged(index: RouteIndex): void {
+    try {
+      if (index.collisions.length === 0) return;
+      const serialized = JSON.stringify(index.collisions);
+      if (serialized === lastLoggedCollisions) return;
+      lastLoggedCollisions = serialized;
+      console.error("route collisions detected (routes disabled until resolved):", index.collisions);
+    } catch {
+      // never allow a logging failure to propagate into the caller.
+    }
+  }
   if (manifestRegistry) {
     internalTokenSecret = resolveSecret(
       opts.internalTokenSecret,
@@ -71,8 +87,10 @@ export function createServer(opts: ServerOptions = {}) {
       "dev-internal-secret-change-me"
     );
     routeIndex = buildRouteIndex(manifestRegistry.getManifests());
+    logCollisionsIfChanged(routeIndex);
     manifestRegistry.onUpdate(() => {
       routeIndex = buildRouteIndex(manifestRegistry.getManifests());
+      logCollisionsIfChanged(routeIndex);
     });
   }
 
@@ -151,30 +169,40 @@ export function createServer(opts: ServerOptions = {}) {
       }
 
       if (manifestRegistry && req.method === "GET") {
+        // Bind the current value of routeIndex to a local const so both reads
+        // below are guaranteed to see the same snapshot, regardless of any
+        // future edit that adds an `await` between them.
+        const index = routeIndex;
         const normalizedPath = url.pathname === "/" ? url.pathname : url.pathname.replace(/\/+$/, "");
         const userId = getAuthenticatedUserId(req, accessTokenSecret);
         if (!userId) return json({ error: "unauthorized" }, 401);
 
         const userRoles = getUserRoles(db, userId);
-        const result = checkAccess(routeIndex, normalizedPath, userRoles);
+        const result = checkAccess(index, normalizedPath, userRoles);
 
         if (result.status === "forbidden") {
-          console.error(
+          console.warn(
             `forbidden: user ${userId} missing one of [${result.requiredRoles.join(", ")}] for ${normalizedPath}`
           );
           return json({ error: "forbidden" }, 403);
         }
 
         if (result.status === "allowed") {
-          const route = routeIndex.routes.get(normalizedPath)!;
+          const route = index.routes.get(normalizedPath)!;
           const scsRoles = userRoles.filter((role) => role.startsWith(`${route.scsName}:`));
           // internalTokenSecret is always resolved above when manifestRegistry is set,
           // which is the only way to reach this branch.
-          const internalToken = signInternalToken(userId, scsRoles, internalTokenSecret!);
+          const internalToken = signInternalToken(userId, scsRoles, route.baseUrl, internalTokenSecret!);
           try {
             const fragmentResponse = await fetch(`${route.baseUrl}${normalizedPath}${url.search}`, {
               headers: { Authorization: `Bearer ${internalToken}` },
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
             });
+            if (fragmentResponse.status >= 300 && fragmentResponse.status < 400) {
+              console.error(`scs fragment fetch for ${normalizedPath} returned an unexpected redirect`);
+              return json({ error: "scs fetch failed" }, 502);
+            }
             const body = await fragmentResponse.arrayBuffer();
             return new Response(body, {
               status: fragmentResponse.status,

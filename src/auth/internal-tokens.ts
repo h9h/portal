@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export type InternalTokenPayload = {
   sub: string;
   roles: string[];
+  aud: string;
   exp: number;
 };
 
@@ -14,11 +15,18 @@ function sign(data: string, secret: string): string {
   return createHmac("sha256", secret).update(data).digest("base64url");
 }
 
-export function signInternalToken(userId: string, roles: string[], secret: string, ttlSeconds = 60): string {
+export function signInternalToken(
+  userId: string,
+  roles: string[],
+  audience: string,
+  secret: string,
+  ttlSeconds = 60
+): string {
   const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload: InternalTokenPayload = {
     sub: userId,
     roles,
+    aud: audience,
     exp: Math.floor(Date.now() / 1000) + ttlSeconds,
   };
   const payloadEncoded = base64url(JSON.stringify(payload));
@@ -49,6 +57,7 @@ export function verifyInternalToken(token: string, secret: string): InternalToke
   if (
     typeof obj.sub !== "string" ||
     typeof obj.exp !== "number" ||
+    typeof obj.aud !== "string" ||
     !Array.isArray(obj.roles) ||
     !obj.roles.every((role) => typeof role === "string")
   ) {
