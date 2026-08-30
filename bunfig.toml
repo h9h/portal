@@ -1,0 +1,31 @@
+jsx = "react"
+jsxFactory = "h"
+jsxFragment = "Fragment"
+jsxImportSource = "react"
+
+logLevel = "debug" # "debug" | "warn" | "error"
+
+telemetry = false
+
+[console]
+  # Whether to display the Bun logo in the console.
+  logo = true
+  depth = 3
+
+[serve]
+  # The port to serve on. Defaults to 3000.
+  port = 3000
+  # The hostname to serve on. Defaults to "localhost".
+  hostname = "localhost"
+  # Whether to enable HTTPS. Defaults to false.
+  https = true
+
+[test]
+  # The test framework to use. Defaults to "bun:test".
+  framework = "bun:test"
+  # The test environment to use. Defaults to "node".
+  environment = "node"
+  root = "./__tests__"
+  pathIgnorePatterns = ["vendor/**", "submodules/**", "fixtures/**"]
+  coverage = true
+  

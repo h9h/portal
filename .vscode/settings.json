@@ -1,0 +1,7 @@
+{
+    "bun.runtime": "/Users/michaelheinke/.local/share/mise/shims/bun",
+    "debug.javascript.defaultRuntimeExecutable": {
+        "pwa-node": "/Users/michaelheinke/.local/share/mise/shims/node"
+    },
+    "python.defaultInterpreterPath": "/Users/michaelheinke/.local/share/mise/installs/python/latest/bin/python"
+}
