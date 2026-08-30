@@ -89,6 +89,84 @@ describe("GET /nav", () => {
   });
 });
 
+describe("nav and route enforcement agree", () => {
+  test("a role-gated path is hidden from nav and 403s, a public path is shown and 200s, for the same manifest", async () => {
+    const ordersFakeScs = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/.portal/manifest") {
+          return new Response(
+            JSON.stringify({
+              name: "orders",
+              routes: [
+                { path: "/orders/admin", requiredRoles: ["orders:admin"] },
+                { path: "/orders/public", requiredRoles: [] },
+              ],
+              nav: [
+                { label: "Orders Admin", path: "/orders/admin", requiredRoles: ["orders:admin"] },
+                { label: "Orders Public", path: "/orders/public", requiredRoles: [] },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.pathname === "/orders/public") {
+          return new Response("public fragment", { status: 200 });
+        }
+        if (url.pathname === "/orders/admin") {
+          return new Response("admin fragment", { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    const ordersRegistry = await createManifestRegistry([ordersFakeScs.url.toString().replace(/\/$/, "")]);
+    const ordersDb = createDatabase(":memory:");
+    const ordersUser = findOrCreateUser(ordersDb, "github", { providerUserId: "2", email: null, displayName: null });
+    const ordersAccessToken = signAccessToken(ordersUser.id, ACCESS_SECRET);
+
+    const ordersPortal = createServer({
+      port: 0,
+      db: ordersDb,
+      accessTokenSecret: ACCESS_SECRET,
+      stateSecret: "state-secret",
+      internalTokenSecret: "internal-secret",
+      manifestRegistry: ordersRegistry,
+    });
+
+    try {
+      const authHeaders = { headers: { Authorization: `Bearer ${ordersAccessToken}` } };
+
+      const navBefore = await fetch(`${ordersPortal.url}nav`, authHeaders);
+      const navBeforeBody = (await navBefore.json()) as { nav: { label: string; path: string; domain: string }[] };
+      expect(navBeforeBody.nav).toEqual([{ label: "Orders Public", path: "/orders/public", domain: "orders" }]);
+
+      const publicBefore = await fetch(`${ordersPortal.url}orders/public`, authHeaders);
+      expect(publicBefore.status).toBe(200);
+
+      const adminBefore = await fetch(`${ordersPortal.url}orders/admin`, authHeaders);
+      expect(adminBefore.status).toBe(403);
+
+      assignRole(ordersDb, ordersUser.id, "orders:admin");
+
+      const navAfter = await fetch(`${ordersPortal.url}nav`, authHeaders);
+      const navAfterBody = (await navAfter.json()) as { nav: { label: string; path: string; domain: string }[] };
+      expect(navAfterBody.nav).toEqual([
+        { label: "Orders Admin", path: "/orders/admin", domain: "orders" },
+        { label: "Orders Public", path: "/orders/public", domain: "orders" },
+      ]);
+
+      const adminAfter = await fetch(`${ordersPortal.url}orders/admin`, authHeaders);
+      expect(adminAfter.status).toBe(200);
+    } finally {
+      ordersPortal.stop();
+      ordersRegistry.stop();
+      ordersFakeScs.stop();
+    }
+  });
+});
+
 describe("GET /nav with no manifestRegistry configured", () => {
   test("returns an empty nav array rather than an error", async () => {
     const noRegistryPortal = createServer({

@@ -173,6 +173,11 @@ export function createServer(opts: ServerOptions = {}) {
         const userId = getAuthenticatedUserId(req, accessTokenSecret);
         if (!userId) return json({ error: "unauthorized" }, 401);
         const userRoles = getUserRoles(db, userId);
+        // Unlike routeIndex (cached, refreshed via onUpdate), /nav reads the
+        // manifest registry live on every request — buildNav is cheap enough
+        // not to need caching. This means /nav can briefly disagree with
+        // route enforcement during a manifest refresh window (self-healing
+        // once the refresh completes); acceptable since nav is display-only.
         const nav = manifestRegistry ? buildNav(manifestRegistry.getManifests(), userRoles) : [];
         return json({ nav });
       }
