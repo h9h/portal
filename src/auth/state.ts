@@ -7,8 +7,9 @@ export function createState(secret: string): string {
 }
 
 export function verifyState(state: string, secret: string): boolean {
-  const [nonce, signature] = state.split(".");
-  if (!nonce || !signature) return false;
+  const parts = state.split(".");
+  if (parts.length !== 2) return false;
+  const [nonce, signature] = parts;
   const expected = createHmac("sha256", secret).update(nonce).digest("base64url");
   const sigBuf = Buffer.from(signature);
   const expectedBuf = Buffer.from(expected);

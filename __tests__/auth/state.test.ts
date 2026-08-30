@@ -21,4 +21,10 @@ describe("OAuth state", () => {
   test("two states are not identical (nonce varies)", () => {
     expect(createState(SECRET)).not.toBe(createState(SECRET));
   });
+
+  test("a state with extra trailing segments fails verification", () => {
+    const state = createState(SECRET);
+    const stateWithGarbage = `${state}.garbage`;
+    expect(verifyState(stateWithGarbage, SECRET)).toBe(false);
+  });
 });
