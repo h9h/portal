@@ -31,7 +31,23 @@ export function verifyAccessToken(token: string, secret: string): AccessTokenPay
   const expectedBuf = Buffer.from(expectedSignature);
   if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null;
 
-  const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AccessTokenPayload;
-  if (decoded.exp < Math.floor(Date.now() / 1000)) return null;
-  return decoded;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  if (
+    typeof decoded !== "object" ||
+    decoded === null ||
+    typeof (decoded as Record<string, unknown>).sub !== "string" ||
+    typeof (decoded as Record<string, unknown>).exp !== "number"
+  ) {
+    return null;
+  }
+
+  const payload_obj = decoded as AccessTokenPayload;
+  if (payload_obj.exp < Math.floor(Date.now() / 1000)) return null;
+  return payload_obj;
 }
