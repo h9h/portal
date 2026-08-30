@@ -14,6 +14,7 @@ let fakeScs: ReturnType<typeof Bun.serve>;
 let scsManifest: { name: string; routes: { path: string; requiredRoles: string[] }[]; nav: [] };
 let receivedAuthHeader: string | null;
 let receivedSearch: string = "";
+let ordersRedirectTo: string | null = null;
 let registry: Awaited<ReturnType<typeof createManifestRegistry>>;
 let portal: ReturnType<typeof createServer>;
 let db: ReturnType<typeof createDatabase>;
@@ -27,6 +28,7 @@ beforeEach(async () => {
     nav: [],
   };
   receivedAuthHeader = null;
+  ordersRedirectTo = null;
 
   fakeScs = Bun.serve({
     port: 0,
@@ -38,6 +40,9 @@ beforeEach(async () => {
       if (url.pathname === "/orders") {
         receivedAuthHeader = req.headers.get("Authorization");
         receivedSearch = url.search;
+        if (ordersRedirectTo) {
+          return new Response(null, { status: 302, headers: { Location: ordersRedirectTo } });
+        }
         return new Response("orders fragment", { status: 200, headers: { "Content-Type": "text/plain" } });
       }
       return new Response("not found", { status: 404 });
@@ -99,17 +104,21 @@ describe("route composition", () => {
     expect(payload).not.toBeNull();
     expect(payload!.sub).toBe(userId);
     expect(payload!.roles).toEqual(["orders:admin"]);
+    expect(payload!.aud).toBe(fakeScs.url.toString().replace(/\/$/, ""));
   });
 
   test("roles from unrelated SCSs are not forwarded in the internal token", async () => {
     assignRole(db, userId, "orders:admin");
     assignRole(db, userId, "billing:admin");
+    assignRole(db, userId, "orders-legacy:admin");
 
     await fetch(`${portal.url}orders`, { headers: { Authorization: `Bearer ${accessToken}` } });
 
     const internalToken = receivedAuthHeader!.slice("Bearer ".length);
     const payload = verifyInternalToken(internalToken, INTERNAL_SECRET);
     expect(payload!.roles).toEqual(["orders:admin"]);
+    expect(payload!.roles).not.toContain("billing:admin");
+    expect(payload!.roles).not.toContain("orders-legacy:admin");
   });
 
   test("a path no manifest declares returns 404", async () => {
@@ -158,5 +167,48 @@ describe("route composition", () => {
 
     const after = await fetch(`${portal.url}orders`, { headers: { Authorization: `Bearer ${accessToken}` } });
     expect(after.status).toBe(403);
+  });
+
+  test("pre-existing Portal routes still work when a registry is configured", async () => {
+    const health = await fetch(`${portal.url}health`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({ status: "ok" });
+
+    const me = await fetch(`${portal.url}me`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    expect(me.status).toBe(200);
+    const meBody = (await me.json()) as { id: string };
+    expect(meBody.id).toBe(userId);
+  });
+
+  test("an unreachable SCS fragment endpoint returns a clean 502", async () => {
+    assignRole(db, userId, "orders:admin");
+    fakeScs.stop(true);
+
+    const response = await fetch(`${portal.url}orders`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(502);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBeTruthy();
+  });
+
+  test("a non-GET request to an enforceable path falls through to 404", async () => {
+    const response = await fetch(`${portal.url}orders`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test("the SCS fragment fetch does not follow redirects and returns a 502 instead", async () => {
+    assignRole(db, userId, "orders:admin");
+    ordersRedirectTo = "https://example.com/attacker-controlled";
+
+    const response = await fetch(`${portal.url}orders`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(502);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBeTruthy();
   });
 });
