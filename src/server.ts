@@ -57,18 +57,24 @@ export function createServer(opts: ServerOptions = {}) {
   const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
   const configuredBaseUrl = (opts.baseUrl ?? process.env.PORTAL_BASE_URL)?.replace(/\/+$/, "");
-  const internalTokenSecret = resolveSecret(
-    opts.internalTokenSecret,
-    "INTERNAL_TOKEN_SECRET",
-    "dev-internal-secret-change-me"
-  );
   const manifestRegistry = opts.manifestRegistry;
-  let routeIndex: RouteIndex = manifestRegistry
-    ? buildRouteIndex(manifestRegistry.getManifests())
-    : { routes: new Map(), collisions: [] };
-  manifestRegistry?.onUpdate(() => {
+  // internalTokenSecret is only resolved (and only reads INTERNAL_TOKEN_SECRET
+  // / warns / can throw in production) when a manifestRegistry is actually
+  // configured, so a registry-less deployment behaves exactly as if this
+  // task's code didn't exist.
+  let internalTokenSecret: string | undefined;
+  let routeIndex: RouteIndex = { routes: new Map(), collisions: [] };
+  if (manifestRegistry) {
+    internalTokenSecret = resolveSecret(
+      opts.internalTokenSecret,
+      "INTERNAL_TOKEN_SECRET",
+      "dev-internal-secret-change-me"
+    );
     routeIndex = buildRouteIndex(manifestRegistry.getManifests());
-  });
+    manifestRegistry.onUpdate(() => {
+      routeIndex = buildRouteIndex(manifestRegistry.getManifests());
+    });
+  }
 
   return Bun.serve({
     port: opts.port ?? 3000,
@@ -162,7 +168,9 @@ export function createServer(opts: ServerOptions = {}) {
         if (result.status === "allowed") {
           const route = routeIndex.routes.get(normalizedPath)!;
           const scsRoles = userRoles.filter((role) => role.startsWith(`${route.scsName}:`));
-          const internalToken = signInternalToken(userId, scsRoles, internalTokenSecret);
+          // internalTokenSecret is always resolved above when manifestRegistry is set,
+          // which is the only way to reach this branch.
+          const internalToken = signInternalToken(userId, scsRoles, internalTokenSecret!);
           try {
             const fragmentResponse = await fetch(`${route.baseUrl}${normalizedPath}${url.search}`, {
               headers: { Authorization: `Bearer ${internalToken}` },

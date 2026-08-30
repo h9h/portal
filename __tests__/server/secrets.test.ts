@@ -4,6 +4,7 @@ import { createDatabase } from "../../src/db";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalAccessTokenSecret = process.env.ACCESS_TOKEN_SECRET;
+const originalInternalTokenSecret = process.env.INTERNAL_TOKEN_SECRET;
 
 afterEach(() => {
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -11,6 +12,9 @@ afterEach(() => {
 
   if (originalAccessTokenSecret === undefined) delete process.env.ACCESS_TOKEN_SECRET;
   else process.env.ACCESS_TOKEN_SECRET = originalAccessTokenSecret;
+
+  if (originalInternalTokenSecret === undefined) delete process.env.INTERNAL_TOKEN_SECRET;
+  else process.env.INTERNAL_TOKEN_SECRET = originalInternalTokenSecret;
 });
 
 describe("resolveSecret production guard", () => {
@@ -42,6 +46,19 @@ describe("resolveSecret production guard", () => {
     delete process.env.ACCESS_TOKEN_SECRET;
 
     const server = createServer({ port: 0, db: createDatabase(":memory:") });
+    server.stop();
+  });
+
+  test("does not resolve or require INTERNAL_TOKEN_SECRET in production when no manifestRegistry is configured", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.INTERNAL_TOKEN_SECRET;
+
+    const server = createServer({
+      port: 0,
+      db: createDatabase(":memory:"),
+      accessTokenSecret: "access-secret",
+      stateSecret: "state-secret",
+    });
     server.stop();
   });
 });
