@@ -277,17 +277,22 @@ export function createServer(opts: ServerOptions = {}) {
 
       const shellAssetMatch = url.pathname.match(/^\/_shell\/(react|react-dom|runtime|shell)\.js$/);
       if (shellAssetMatch && req.method === "GET") {
-        const assets = await getShellAssets();
-        const byName: Record<string, string> = {
-          react: assets.reactJs,
-          "react-dom": assets.reactDomJs,
-          runtime: assets.runtimeJs,
-          shell: assets.shellJs,
-        };
-        return new Response(byName[shellAssetMatch[1]], {
-          status: 200,
-          headers: { "Content-Type": "text/javascript; charset=utf-8" },
-        });
+        try {
+          const assets = await getShellAssets();
+          const byName: Record<string, string> = {
+            react: assets.reactJs,
+            "react-dom": assets.reactDomJs,
+            runtime: assets.runtimeJs,
+            shell: assets.shellJs,
+          };
+          return new Response(byName[shellAssetMatch[1]], {
+            status: 200,
+            headers: { "Content-Type": "text/javascript; charset=utf-8" },
+          });
+        } catch (err) {
+          console.error("shell asset build failed", err);
+          return json({ error: "shell asset build failed" }, 502);
+        }
       }
 
       if (url.pathname === "/admin/users" && req.method === "GET") {

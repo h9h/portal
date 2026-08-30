@@ -8,7 +8,7 @@ const defaultLoader: ComponentLoader = (bundleUrl) => import(/* @vite-ignore */ 
 
 type Me = { id: string; roles: string[] } | null;
 type RoutesResponse = { routes: RouteTableEntry[]; contextOwners: Record<string, string> };
-type Status = "loading" | "login" | "forbidden" | "not_found" | "ready";
+type Status = "loading" | "login" | "forbidden" | "not_found" | "error" | "ready";
 
 class MountErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -28,19 +28,28 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
   const [mounted, setMounted] = useState<{ Component: React.ComponentType; scsName: string } | null>(null);
   const [status, setStatus] = useState<Status>("loading");
 
-  // Boot once: identity + the full route table.
+  // Boot once: identity + the full route table. Any rejection here (network
+  // failure, unparseable JSON) must still resolve to a terminal status —
+  // otherwise `status` is stuck at "loading" forever, since nothing else
+  // ever sets it and MountErrorBoundary can't catch a rejected promise
+  // inside a useEffect (it only catches render/lifecycle errors).
   useEffect(() => {
     (async () => {
-      const meResponse = await portalFetch("/me");
-      if (meResponse.status === 401) {
-        setMe(null);
-        setStatus("login");
-        return;
+      try {
+        const meResponse = await portalFetch("/me");
+        if (meResponse.status === 401) {
+          setMe(null);
+          setStatus("login");
+          return;
+        }
+        const meJson = (await meResponse.json()) as NonNullable<Me>;
+        setMe(meJson);
+        const routesResponse = await portalFetch("/routes");
+        setRoutesData((await routesResponse.json()) as RoutesResponse);
+      } catch (err) {
+        console.error("shell boot failed", err);
+        setStatus("error");
       }
-      const meJson = (await meResponse.json()) as NonNullable<Me>;
-      setMe(meJson);
-      const routesResponse = await portalFetch("/routes");
-      setRoutesData((await routesResponse.json()) as RoutesResponse);
     })();
   }, []);
 
@@ -48,33 +57,38 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
   // loaded route table changes.
   useEffect(() => {
     if (me === undefined || me === null || !routesData) return;
+    // Reset to "loading" before resolving the new path, so a navigation
+    // doesn't keep rendering the previous route's component (with the
+    // previous scsName in PortalRuntimeProvider) while the new one loads.
+    setStatus("loading");
+    setMounted(null);
     let cancelled = false;
     (async () => {
-      const resolution = resolveRoute(routesData.routes, path, me.roles);
-      if (resolution.status === "not_found" || resolution.status === "no_component") {
-        if (!cancelled) {
+      try {
+        const resolution = resolveRoute(routesData.routes, path, me.roles);
+        if (resolution.status === "not_found" || resolution.status === "no_component") {
+          if (!cancelled) setStatus("not_found");
+          return;
+        }
+        if (resolution.status === "forbidden") {
+          if (!cancelled) setStatus("forbidden");
+          return;
+        }
+        const module = await loadComponent(`/_scs/${resolution.entry.scsName}/bundle.js`);
+        const ResolvedComponent = module[resolution.entry.component!] as React.ComponentType | undefined;
+        if (cancelled) return;
+        if (!ResolvedComponent) {
           setStatus("not_found");
-          setMounted(null);
+          return;
         }
-        return;
-      }
-      if (resolution.status === "forbidden") {
+        setMounted({ Component: ResolvedComponent, scsName: resolution.entry.scsName });
+        setStatus("ready");
+      } catch (err) {
         if (!cancelled) {
-          setStatus("forbidden");
-          setMounted(null);
+          console.error("route resolve/mount failed", err);
+          setStatus("error");
         }
-        return;
       }
-      const module = await loadComponent(`/_scs/${resolution.entry.scsName}/bundle.js`);
-      const ResolvedComponent = module[resolution.entry.component!] as React.ComponentType | undefined;
-      if (cancelled) return;
-      if (!ResolvedComponent) {
-        setStatus("not_found");
-        setMounted(null);
-        return;
-      }
-      setMounted({ Component: ResolvedComponent, scsName: resolution.entry.scsName });
-      setStatus("ready");
     })();
     return () => {
       cancelled = true;
@@ -85,6 +99,7 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
   if (status === "login") return <div>Please log in.</div>;
   if (status === "forbidden") return <div>You don't have access to this page.</div>;
   if (status === "not_found") return <div>Not found.</div>;
+  if (status === "error") return <div>Something went wrong loading this page.</div>;
 
   const { Component: Mounted, scsName } = mounted!;
   return (

@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getShellAssets } from "../../src/shell/bundle";
+import { getShellAssets, __resetShellAssetsCacheForTests } from "../../src/shell/bundle";
 
 // Dynamically imports ESM source text by writing it to a real temp file
 // first (a data: URL works for small snippets, but Bun rejects a
@@ -105,5 +105,39 @@ describe("getShellAssets", () => {
     const first = await getShellAssets();
     const second = await getShellAssets();
     expect(second).toBe(first);
+  });
+
+  // Fix-round regression test (whole-branch review): getShellAssets() used
+  // to cache the *rejected* promise from a failed build, so one transient
+  // Bun.build failure bricked every /_shell/* request for the rest of the
+  // process's life. Forces one real Bun.build call to fail (only Bun.build
+  // itself is stubbed, for exactly one call — buildOne, getShellAssets, and
+  // every other build in this test still run for real), then confirms the
+  // very next call gets a fresh, real, successful build rather than the
+  // same cached rejection.
+  test("a build failure does not poison the cache — the next call gets a fresh attempt", async () => {
+    __resetShellAssetsCacheForTests();
+    const originalBuild = Bun.build;
+    let calls = 0;
+    (Bun as unknown as { build: typeof Bun.build }).build = ((...args: Parameters<typeof Bun.build>) => {
+      calls++;
+      if (calls === 1) {
+        return Promise.resolve({
+          success: false,
+          logs: [{ message: "simulated build failure" }],
+          outputs: [],
+        }) as unknown as ReturnType<typeof Bun.build>;
+      }
+      return originalBuild(...args);
+    }) as typeof Bun.build;
+
+    try {
+      await expect(getShellAssets()).rejects.toThrow(/simulated build failure/);
+      const assets = await getShellAssets();
+      expect(assets.reactJs.length).toBeGreaterThan(0);
+      expect(assets.shellJs.length).toBeGreaterThan(0);
+    } finally {
+      Bun.build = originalBuild;
+    }
   });
 });

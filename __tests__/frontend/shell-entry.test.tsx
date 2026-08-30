@@ -148,6 +148,154 @@ describe("shell App", () => {
     }
   });
 
+  // Fix-round regression test (whole-branch review): a rejected promise
+  // inside a useEffect can't be caught by MountErrorBoundary (it only
+  // catches render/lifecycle errors), so an unhandled rejection here used
+  // to leave `status` stuck at "loading" forever.
+  test("shows an error state when the boot fetch itself rejects (network failure)", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mock(async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+      await flush(act);
+
+      expect(container.textContent).toContain("Something went wrong");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // Fix-round regression test (whole-branch review): same gap as above, but
+  // in the resolve+mount effect — a malformed/404 SCS bundle rejecting
+  // `loadComponent` used to leave `status` stuck at "loading" forever too.
+  test("shows an error state when the injected loader rejects (malformed or missing SCS bundle)", async () => {
+    setInitialPath("/orders");
+    const restore = mockFetchSequence([
+      { path: "/me", status: 200, body: { id: "u1", roles: ["orders:viewer"] } },
+      {
+        path: "/routes",
+        status: 200,
+        body: {
+          routes: [{ path: "/orders", scsName: "orders", requiredRoles: ["orders:viewer"], component: "OrdersView" }],
+          contextOwners: {},
+        },
+      },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const loadComponent = mock(async (_url: string) => {
+      throw new Error("bundle fetch failed");
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App loadComponent={loadComponent} />);
+      });
+      await flush(act);
+
+      expect(container.textContent).toContain("Something went wrong");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+    }
+  });
+
+  // Fix-round regression test (whole-branch review): the resolve+mount
+  // effect used to never reset `status`/`mounted` when `path` changed, so
+  // React kept rendering the *previous* route's component (with the
+  // previous scsName in PortalRuntimeProvider) while the new route's bundle
+  // was still loading.
+  test("navigating to a new route clears the previous view immediately instead of leaving a stale render", async () => {
+    setInitialPath("/orders");
+    const restore = mockFetchSequence([
+      { path: "/me", status: 200, body: { id: "u1", roles: ["orders:viewer", "billing:viewer"] } },
+      {
+        path: "/routes",
+        status: 200,
+        body: {
+          routes: [
+            { path: "/orders", scsName: "orders", requiredRoles: ["orders:viewer"], component: "OrdersView" },
+            { path: "/billing", scsName: "billing", requiredRoles: ["billing:viewer"], component: "BillingView" },
+          ],
+          contextOwners: {},
+        },
+      },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    function OrdersView() {
+      return <div>orders view</div>;
+    }
+    function BillingView() {
+      return <div>billing view</div>;
+    }
+    // Orders resolves immediately; billing stays pending until the test
+    // resolves it explicitly, so the "still loading" moment is observable.
+    let resolveBilling: (mod: Record<string, unknown>) => void = () => {};
+    const loadComponent = mock(
+      (url: string) =>
+        url === "/_scs/orders/bundle.js"
+          ? Promise.resolve({ OrdersView })
+          : new Promise<Record<string, unknown>>((resolve) => {
+              resolveBilling = resolve;
+            })
+    );
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App loadComponent={loadComponent} />);
+      });
+      await flush(act);
+      expect(container.textContent).toContain("orders view");
+
+      await act(async () => {
+        history.pushState(null, "", "/billing");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+
+      expect(container.textContent).not.toContain("orders view");
+      expect(container.textContent).toContain("Loading");
+
+      await act(async () => {
+        resolveBilling({ BillingView });
+      });
+      await flush(act);
+
+      expect(container.textContent).toContain("billing view");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+    }
+  });
+
   test("shows a not-found state when the resolved module lacks the named export", async () => {
     setInitialPath("/orders");
     const restore = mockFetchSequence([

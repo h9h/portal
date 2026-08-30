@@ -6,6 +6,7 @@ import { signAccessToken } from "../../src/auth/tokens";
 import { verifyInternalToken } from "../../src/auth/internal-tokens";
 import { assignRole } from "../../src/rights/roles";
 import { findOrCreateUser } from "../../src/auth/users";
+import { __resetShellAssetsCacheForTests } from "../../src/shell/bundle";
 
 const ACCESS_SECRET = "access-secret";
 const INTERNAL_SECRET = "internal-secret";
@@ -378,6 +379,34 @@ describe("GET /_shell/*", () => {
       expect(response.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
       const body = await response.text();
       expect(body.length).toBeGreaterThan(0);
+    }
+  });
+
+  // Fix-round regression test (whole-branch review): the handler used to
+  // let a getShellAssets() rejection propagate unhandled out of fetch()
+  // instead of returning a clean error response, unlike every other
+  // dependency-fetch branch in this file (the /_scs/:scsName/bundle.js
+  // proxy just above it). Forces one real Bun.build call to fail (see
+  // bundle.test.ts's identical technique) and confirms the route now
+  // returns a clean 502 instead of throwing.
+  test("returns a clean 502 if the underlying build fails, instead of throwing unhandled", async () => {
+    __resetShellAssetsCacheForTests();
+    const originalBuild = Bun.build;
+    (Bun as unknown as { build: typeof Bun.build }).build = (() =>
+      Promise.resolve({
+        success: false,
+        logs: [{ message: "simulated build failure" }],
+        outputs: [],
+      })) as unknown as typeof Bun.build;
+
+    try {
+      const response = await fetch(`${portal.url}_shell/react.js`);
+      expect(response.status).toBe(502);
+      const body = await response.json();
+      expect(body).toEqual({ error: "shell asset build failed" });
+    } finally {
+      Bun.build = originalBuild;
+      __resetShellAssetsCacheForTests(); // don't leave the poisoned-then-cleared cache behind for later tests
     }
   });
 });

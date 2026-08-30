@@ -14,7 +14,7 @@ let cached: Promise<ShellAssets> | null = null;
 // depends on this repo's own source files, never on server instance config.
 export function getShellAssets(): Promise<ShellAssets> {
   if (!cached) {
-    cached = (async () => {
+    const build = (async () => {
       const [reactJs, reactDomJs, runtimeJs, shellJs] = await Promise.all([
         buildOne(new URL("./vendor/react-entry.ts", import.meta.url).pathname),
         buildOne(new URL("./vendor/react-dom-entry.ts", import.meta.url).pathname, ["react"]),
@@ -27,8 +27,26 @@ export function getShellAssets(): Promise<ShellAssets> {
       ]);
       return { reactJs, reactDomJs, runtimeJs, shellJs };
     })();
+    // A transient failure (e.g. a passing but temporarily broken build)
+    // must not poison every future call for the rest of the process's
+    // life — clear the cache on rejection so the next request gets a
+    // fresh build attempt. This only clears the cache slot; the rejection
+    // itself still propagates to whoever is awaiting `build` right now.
+    build.catch(() => {
+      if (cached === build) cached = null;
+    });
+    cached = build;
   }
   return cached;
+}
+
+// Test-only seam: `cached` is a module-level singleton shared by every
+// caller in the process (including every other test file that hits
+// `GET /_shell/*`), so a test that wants to force a fresh build — e.g. to
+// exercise the retry-after-failure path above — needs a way to clear it
+// without waiting on execution order across files.
+export function __resetShellAssetsCacheForTests(): void {
+  cached = null;
 }
 
 async function buildOne(entrypoint: string, external: string[] = []): Promise<string> {
