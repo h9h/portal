@@ -1,4 +1,4 @@
-// Static bootstrap page: no per-request data. The four /_shell/* URLs below
+// Static bootstrap page: no per-request data. The /_shell/* URLs below
 // don't exist as real endpoints until a later task adds them (see this
 // plan's Task 9) — this file only needs to produce correct, stable HTML
 // structure; it doesn't need those endpoints to work yet.
@@ -6,7 +6,9 @@ export function renderShellHtml(): string {
   const importMap = {
     imports: {
       react: "/_shell/react.js",
+      "react-dom": "/_shell/react-dom.js",
       "react-dom/client": "/_shell/react-dom.js",
+      "react/jsx-runtime": "/_shell/jsx-runtime.js",
       "@portal/runtime": "/_shell/runtime.js",
     },
   };

@@ -348,7 +348,7 @@ describe("GET /_scs/:scsName/bundle.js", () => {
     expect(response.status).toBe(404);
   });
 
-  test("proxies the SCS's bundle bytes and content-type when declared, with no role check", async () => {
+  test("proxies the SCS's bundle bytes when declared, with no role check, always as text/javascript", async () => {
     scsManifest = { name: "orders", bundle: "/.portal/bundle.js", routes: [], nav: [] } as any;
     await new Promise((resolve) => setTimeout(resolve, 40));
     // userId/accessToken (from beforeEach) hold no roles at all — bundle fetch must still succeed
@@ -358,6 +358,44 @@ describe("GET /_scs/:scsName/bundle.js", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
     expect(await response.text()).toBe("export const OrdersView = () => null;");
+  });
+
+  test("hardcodes the response Content-Type even if the SCS declares a different one, and sets nosniff", async () => {
+    fakeScs.stop(true);
+    fakeScs = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/.portal/manifest") {
+          return new Response(JSON.stringify(scsManifest), { status: 200 });
+        }
+        if (url.pathname === "/.portal/bundle.js") {
+          return new Response("<html>not actually js</html>", {
+            status: 200,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    scsManifest = { name: "orders", bundle: "/.portal/bundle.js", routes: [], nav: [] } as any;
+    registry = await createManifestRegistry([fakeScs.url.toString().replace(/\/$/, "")], { refreshIntervalMs: 20 });
+    portal.stop();
+    portal = createServer({
+      port: 0,
+      db,
+      accessTokenSecret: ACCESS_SECRET,
+      stateSecret: "state-secret",
+      internalTokenSecret: INTERNAL_SECRET,
+      manifestRegistry: registry,
+    });
+
+    const response = await fetch(`${portal.url}_scs/orders/bundle.js`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
   test("an unreachable SCS returns a clean 502", async () => {
@@ -373,13 +411,24 @@ describe("GET /_scs/:scsName/bundle.js", () => {
 
 describe("GET /_shell/*", () => {
   test("serves each asset unauthenticated, with a JS content-type", async () => {
-    for (const name of ["react", "react-dom", "runtime", "shell"]) {
+    for (const name of ["react", "react-dom", "jsx-runtime", "runtime", "shell"]) {
       const response = await fetch(`${portal.url}_shell/${name}.js`);
       expect(response.status).toBe(200);
       expect(response.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
       const body = await response.text();
       expect(body.length).toBeGreaterThan(0);
     }
+  });
+
+  // Fix-round regression test (whole-branch review): getShellAssets()'s
+  // output never changes for the life of the process, but every /_shell/*
+  // response previously had no Cache-Control or ETag at all — so every page
+  // navigation re-fetched the full ~500KB react-dom bundle from scratch.
+  test("responses carry an ETag and Cache-Control for revalidation", async () => {
+    const response = await fetch(`${portal.url}_shell/react.js`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("ETag")).toBeTruthy();
+    expect(response.headers.get("Cache-Control")).toBe("no-cache");
   });
 
   // Fix-round regression test (whole-branch review): the handler used to
@@ -407,6 +456,77 @@ describe("GET /_shell/*", () => {
     } finally {
       Bun.build = originalBuild;
       __resetShellAssetsCacheForTests(); // don't leave the poisoned-then-cleared cache behind for later tests
+    }
+  });
+});
+
+describe("manifest name collisions across distinct base URLs", () => {
+  test("voids bundle resolution and context ownership for a name claimed by two distinct SCSs", async () => {
+    // fakeScs (from beforeEach) already self-declares "orders" with a bundle
+    // and no context keys. Stand up a second, distinct SCS that also
+    // self-declares "orders" (a different base URL), each with its own
+    // distinct route and context key, so the collision can be attributed
+    // unambiguously if it were (wrongly) resolved instead of voided.
+    scsManifest = {
+      name: "orders",
+      bundle: "/.portal/bundle.js",
+      routes: [{ path: "/orders-a", requiredRoles: [] }],
+      nav: [],
+      publishesContext: ["ctxA"],
+    } as any;
+
+    const secondScsManifest = {
+      name: "orders",
+      bundle: "/.portal/bundle.js",
+      routes: [{ path: "/orders-b", requiredRoles: [] }],
+      nav: [],
+      publishesContext: ["ctxB"],
+    };
+    const secondScs = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/.portal/manifest") {
+          return new Response(JSON.stringify(secondScsManifest), { status: 200 });
+        }
+        if (url.pathname === "/.portal/bundle.js") {
+          return new Response("export const Other = () => null;", {
+            status: 200,
+            headers: { "Content-Type": "text/javascript; charset=utf-8" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    try {
+      registry.stop();
+      registry = await createManifestRegistry(
+        [fakeScs.url.toString().replace(/\/$/, ""), secondScs.url.toString().replace(/\/$/, "")],
+        { refreshIntervalMs: 20 }
+      );
+      portal.stop();
+      portal = createServer({
+        port: 0,
+        db,
+        accessTokenSecret: ACCESS_SECRET,
+        stateSecret: "state-secret",
+        internalTokenSecret: INTERNAL_SECRET,
+        manifestRegistry: registry,
+      });
+
+      const bundleResponse = await fetch(`${portal.url}_scs/orders/bundle.js`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      expect(bundleResponse.status).toBe(404);
+
+      const routesResponse = await fetch(`${portal.url}routes`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const routesBody = (await routesResponse.json()) as { contextOwners: Record<string, string> };
+      expect(routesBody.contextOwners).toEqual({});
+    } finally {
+      secondScs.stop(true);
     }
   });
 });

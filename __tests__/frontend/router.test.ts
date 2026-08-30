@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { resolveRoute, type RouteTableEntry } from "../../src/frontend/router";
+import { resolveRoute, normalizePath, type RouteTableEntry } from "../../src/frontend/router";
 
 const table: RouteTableEntry[] = [
   { path: "/orders", scsName: "orders", requiredRoles: ["orders:viewer"], component: "OrdersView" },
@@ -31,7 +31,25 @@ describe("resolveRoute", () => {
     expect(resolveRoute(table, "/orders/summary", ["orders:viewer"])).toEqual({ status: "no_component" });
   });
 
-  test("path matching is exact — a trailing slash does not match", () => {
-    expect(resolveRoute(table, "/orders/", ["orders:viewer"])).toEqual({ status: "not_found" });
+  // Fix-round regression test (whole-branch review): src/server.ts's
+  // composition catch-all normalizes the request path (stripping trailing
+  // slashes) before consulting the route index, so `.../orders/` is served
+  // the same as `.../orders`. resolveRoute previously had no matching
+  // normalization, so a trailing-slash navigation would get the shell HTML
+  // from the server and then a client-side "Not found" for a path the
+  // server would happily serve.
+  test("a trailing slash is normalized before matching, resolving the same entry", () => {
+    expect(resolveRoute(table, "/orders/", ["orders:viewer"])).toEqual({
+      status: "matched",
+      entry: table[0],
+    });
+  });
+
+  // The root path "/" has no table entry in this fixture, so this only
+  // confirms normalizePath itself leaves a bare "/" untouched (never
+  // stripped down to an empty string) rather than exercising resolveRoute's
+  // lookup against a "/" entry.
+  test("normalizePath leaves a bare root path untouched", () => {
+    expect(normalizePath("/")).toBe("/");
   });
 });

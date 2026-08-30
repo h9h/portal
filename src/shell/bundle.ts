@@ -1,6 +1,7 @@
 export type ShellAssets = {
   reactJs: string;
   reactDomJs: string;
+  jsxRuntimeJs: string;
   runtimeJs: string;
   shellJs: string;
 };
@@ -15,9 +16,10 @@ let cached: Promise<ShellAssets> | null = null;
 export function getShellAssets(): Promise<ShellAssets> {
   if (!cached) {
     const build = (async () => {
-      const [reactJs, reactDomJs, runtimeJs, shellJs] = await Promise.all([
+      const [reactJs, reactDomJs, jsxRuntimeJs, runtimeJs, shellJs] = await Promise.all([
         buildOne(new URL("./vendor/react-entry.ts", import.meta.url).pathname),
         buildOne(new URL("./vendor/react-dom-entry.ts", import.meta.url).pathname, ["react"]),
+        buildOne(new URL("./vendor/jsx-runtime-entry.ts", import.meta.url).pathname),
         buildOne(new URL("../runtime/index.ts", import.meta.url).pathname, ["react"]),
         buildOne(new URL("../frontend/shell-boot.tsx", import.meta.url).pathname, [
           "react",
@@ -25,7 +27,7 @@ export function getShellAssets(): Promise<ShellAssets> {
           "@portal/runtime",
         ]),
       ]);
-      return { reactJs, reactDomJs, runtimeJs, shellJs };
+      return { reactJs, reactDomJs, jsxRuntimeJs, runtimeJs, shellJs };
     })();
     // A transient failure (e.g. a passing but temporarily broken build)
     // must not poison every future call for the rest of the process's

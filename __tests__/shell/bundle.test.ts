@@ -21,10 +21,11 @@ async function importFromSource(code: string): Promise<Record<string, unknown>> 
 }
 
 describe("getShellAssets", () => {
-  test("builds all four assets as non-empty JS text", async () => {
+  test("builds all five assets as non-empty JS text", async () => {
     const assets = await getShellAssets();
     expect(assets.reactJs.length).toBeGreaterThan(0);
     expect(assets.reactDomJs.length).toBeGreaterThan(0);
+    expect(assets.jsxRuntimeJs.length).toBeGreaterThan(0);
     expect(assets.runtimeJs.length).toBeGreaterThan(0);
     expect(assets.shellJs.length).toBeGreaterThan(0);
   });
@@ -85,6 +86,33 @@ describe("getShellAssets", () => {
     expect(typeof mod.createElement).toBe("function");
     expect(typeof mod.Component).toBe("function");
     expect(mod.default).toBeTruthy();
+  });
+
+  // Fix-round regression test (whole-branch review): a third-party SCS
+  // bundle built with the standard automatic JSX runtime (Babel/esbuild/SWC/
+  // TS all do this the same way) emits a bare `import { jsx } from
+  // "react/jsx-runtime"` with no way to know it needs covering — unlike
+  // Portal's own bundles, which sidestep this via bundle.ts's
+  // inlineJsxRuntime plugin. This asset exists so the shell's import map
+  // (bootstrap-html.ts) can resolve that bare specifier for any SCS.
+  test("the built jsx-runtime.js bundle exposes jsx, jsxs, and Fragment as real named exports", async () => {
+    const assets = await getShellAssets();
+    const mod = await importFromSource(assets.jsxRuntimeJs);
+    expect(typeof mod.jsx).toBe("function");
+    expect(typeof mod.jsxs).toBe("function");
+    expect(mod.Fragment).toBeTruthy();
+  });
+
+  // Fix-round regression test (whole-branch review): react-dom's own CJS
+  // build reads this symbol directly off "react" at module-load time to
+  // coordinate with react's shared dispatcher (see react-entry.ts's
+  // comment) and does NOT throw if it's undefined — a missing/renamed
+  // symbol here would only surface as a browser crash on first render, with
+  // nothing in this suite catching it beforehand.
+  test("the built react.js bundle exports the internals symbol react-dom reads at module-load time", async () => {
+    const assets = await getShellAssets();
+    const mod = await importFromSource(assets.reactJs);
+    expect(mod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE).toBeTruthy();
   });
 
   test("the built react-dom.js bundle exposes createRoot as a real named export", async () => {

@@ -11,6 +11,7 @@ import { buildRouteIndex, checkAccess, type RouteIndex } from "./rights/route-ac
 import { assignRole, getUserRoles, revokeRole } from "./rights/roles";
 import { buildNav } from "./rights/nav";
 import { buildContextIndex, type ContextIndex } from "./rights/context-index";
+import { detectNameCollisions, type NameCollision } from "./rights/name-index";
 import { buildRouteTable, buildContextOwners } from "./shell/route-table";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
@@ -83,6 +84,7 @@ export function createServer(opts: ServerOptions = {}) {
   let internalTokenSecret: string | undefined;
   let routeIndex: RouteIndex = { routes: new Map(), collisions: [] };
   let contextIndex: ContextIndex = { owners: new Map(), collisions: [] };
+  let nameCollisions: NameCollision[] = [];
   // Tracks the previously logged collision set (by content) so a persistent
   // misconfiguration is reported once, not on every refresh. Wrapped so a
   // logging bug here can never throw and abort the registry's onUpdate
@@ -113,6 +115,24 @@ export function createServer(opts: ServerOptions = {}) {
       // never allow a logging failure to propagate into the caller.
     }
   }
+  // Same shape as logCollisionsIfChanged/logContextCollisionsIfChanged, with
+  // its own lastLogged state so name collision logging doesn't clobber the
+  // other two.
+  let lastLoggedNameCollisions = "";
+  function logNameCollisionsIfChanged(collisions: NameCollision[]): void {
+    try {
+      if (collisions.length === 0) return;
+      const serialized = JSON.stringify(collisions);
+      if (serialized === lastLoggedNameCollisions) return;
+      lastLoggedNameCollisions = serialized;
+      console.error(
+        "manifest name collisions detected (bundle resolution and context ownership disabled for these names until resolved):",
+        collisions
+      );
+    } catch {
+      // never allow a logging failure to propagate into the caller.
+    }
+  }
   // Returns the authenticated caller's userId if they hold portal:admin, or
   // a Response to return immediately (401 unauthenticated, 403 not an admin).
   function requireAdmin(req: Request): string | Response {
@@ -129,13 +149,17 @@ export function createServer(opts: ServerOptions = {}) {
     );
     routeIndex = buildRouteIndex(manifestRegistry.getManifests());
     contextIndex = buildContextIndex(manifestRegistry.getManifests());
+    nameCollisions = detectNameCollisions(manifestRegistry.getManifests());
     logCollisionsIfChanged(routeIndex);
     logContextCollisionsIfChanged(contextIndex);
+    logNameCollisionsIfChanged(nameCollisions);
     manifestRegistry.onUpdate(() => {
       routeIndex = buildRouteIndex(manifestRegistry.getManifests());
       contextIndex = buildContextIndex(manifestRegistry.getManifests());
+      nameCollisions = detectNameCollisions(manifestRegistry.getManifests());
       logCollisionsIfChanged(routeIndex);
       logContextCollisionsIfChanged(contextIndex);
+      logNameCollisionsIfChanged(nameCollisions);
     });
   }
 
@@ -232,7 +256,11 @@ export function createServer(opts: ServerOptions = {}) {
       if (url.pathname === "/routes" && req.method === "GET") {
         const userId = getAuthenticatedUserId(req, accessTokenSecret);
         if (!userId) return json({ error: "unauthorized" }, 401);
-        return json({ routes: buildRouteTable(routeIndex), contextOwners: buildContextOwners(contextIndex) });
+        const collidingNames = new Set(nameCollisions.map((c) => c.name));
+        const contextOwners = Object.fromEntries(
+          Object.entries(buildContextOwners(contextIndex)).filter(([, ownerName]) => !collidingNames.has(ownerName))
+        );
+        return json({ routes: buildRouteTable(routeIndex), contextOwners });
       }
 
       const bundleMatch = url.pathname.match(/^\/_scs\/([^/]+)\/bundle\.js$/);
@@ -244,10 +272,16 @@ export function createServer(opts: ServerOptions = {}) {
         // already accepted elsewhere in this codebase for that field (see
         // specification.md's role-namespace-filtering open question) — first
         // match wins, bounded by the existing operator-trusted, static
-        // base-URL list.
-        const scsEntry = (manifestRegistry?.getManifests() ?? []).find(
-          (entry) => entry.manifest?.name === requestedScsName && entry.manifest.bundle
-        );
+        // base-URL list. A name currently claimed by more than one distinct
+        // base URL (see detectNameCollisions) is excluded entirely rather
+        // than resolved non-deterministically: two same-named SCSs would
+        // otherwise race on which one's bundle gets served here.
+        const collidingNames = new Set(nameCollisions.map((c) => c.name));
+        const scsEntry = collidingNames.has(requestedScsName)
+          ? undefined
+          : (manifestRegistry?.getManifests() ?? []).find(
+              (entry) => entry.manifest?.name === requestedScsName && entry.manifest.bundle
+            );
         if (!scsEntry || !scsEntry.manifest?.bundle) return json({ error: "not found" }, 404);
         try {
           const bundleResponse = await fetch(`${scsEntry.baseUrl}${scsEntry.manifest.bundle}`, {
@@ -265,8 +299,14 @@ export function createServer(opts: ServerOptions = {}) {
           const body = await bundleResponse.arrayBuffer();
           return new Response(body, {
             status: 200,
+            // Hardcoded, never the SCS's own declared Content-Type: this is
+            // a fixed, directly-navigable Portal-origin URL gated only on
+            // authentication (no role check), so an SCS serving its bundle
+            // path with e.g. Content-Type: text/html could otherwise have
+            // that HTML rendered same-origin under Portal's domain.
             headers: {
-              "Content-Type": bundleResponse.headers.get("Content-Type") ?? "text/javascript; charset=utf-8",
+              "Content-Type": "text/javascript; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
             },
           });
         } catch (err) {
@@ -275,19 +315,31 @@ export function createServer(opts: ServerOptions = {}) {
         }
       }
 
-      const shellAssetMatch = url.pathname.match(/^\/_shell\/(react|react-dom|runtime|shell)\.js$/);
+      const shellAssetMatch = url.pathname.match(/^\/_shell\/(react|react-dom|jsx-runtime|runtime|shell)\.js$/);
       if (shellAssetMatch && req.method === "GET") {
         try {
           const assets = await getShellAssets();
           const byName: Record<string, string> = {
             react: assets.reactJs,
             "react-dom": assets.reactDomJs,
+            "jsx-runtime": assets.jsxRuntimeJs,
             runtime: assets.runtimeJs,
             shell: assets.shellJs,
           };
-          return new Response(byName[shellAssetMatch[1]], {
+          const body = byName[shellAssetMatch[1]];
+          return new Response(body, {
             status: 200,
-            headers: { "Content-Type": "text/javascript; charset=utf-8" },
+            headers: {
+              "Content-Type": "text/javascript; charset=utf-8",
+              // getShellAssets() is memoized for the life of the process
+              // (its output never changes without a redeploy), but there's
+              // no versioned/hashed URL scheme yet — ETag + no-cache forces
+              // revalidation on every request instead of either re-sending
+              // ~500KB of react-dom on every navigation or blind long-term
+              // caching that can't be busted.
+              ETag: `"${Bun.hash(body).toString(16)}"`,
+              "Cache-Control": "no-cache",
+            },
           });
         } catch (err) {
           console.error("shell asset build failed", err);
