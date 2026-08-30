@@ -119,4 +119,35 @@ describe("full login flow", () => {
     });
     expect(refreshResponse.status).toBe(401);
   });
+
+  test("refresh with an empty body returns 400, not a crash", async () => {
+    const response = await fetch(`${portal.url}auth/refresh`, { method: "POST" });
+    expect(response.status).toBe(400);
+  });
+
+  test("logout with an empty body is a no-op success, not a crash", async () => {
+    const response = await fetch(`${portal.url}auth/logout`, { method: "POST" });
+    expect(response.status).toBe(200);
+  });
+
+  test("login with a prototype-pollution-style provider name returns 404, not a crash", async () => {
+    const response = await fetch(`${portal.url}auth/login/constructor`, { redirect: "manual" });
+    expect(response.status).toBe(404);
+  });
+
+  test("callback with a bad code returns a clean error, not a crash", async () => {
+    const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
+    const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+
+    const callbackResponse = await fetch(
+      `${portal.url}auth/callback/fake?code=wrong-code&state=${encodeURIComponent(state)}`
+    );
+    // 502: a clean JSON error reporting the upstream (provider) failure —
+    // not Bun's HTML stack-trace crash page (which would be a 500 with
+    // Content-Type text/html).
+    expect(callbackResponse.status).toBe(502);
+    expect(callbackResponse.headers.get("Content-Type")).toBe("application/json");
+    const body = await callbackResponse.json();
+    expect(body.error).toBeTruthy();
+  });
 });

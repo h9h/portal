@@ -23,11 +23,32 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+// Looks up a provider by name without falling through to inherited
+// Object.prototype members (e.g. "constructor", "__proto__", "toString").
+function getProvider(providers: Record<string, OAuthProviderConfig>, name: string): OAuthProviderConfig | undefined {
+  if (!Object.prototype.hasOwnProperty.call(providers, name)) return undefined;
+  return providers[name];
+}
+
+// Resolves a signing secret from explicit opts, then env, then a dev default.
+// Fails fast in production if neither opts nor env supplied a value, since
+// booting with the hardcoded dev default would let anyone who reads this
+// source forge valid tokens.
+function resolveSecret(explicit: string | undefined, envVar: string, devDefault: string): string {
+  const value = explicit ?? process.env[envVar];
+  if (value !== undefined) return value;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(`${envVar} must be set in production (refusing to boot with the dev default)`);
+  }
+  console.warn(`${envVar} is not set; using an insecure development default. Set ${envVar} before deploying.`);
+  return devDefault;
+}
+
 export function createServer(opts: ServerOptions = {}) {
   const db = opts.db ?? createDatabase(process.env.DATABASE_PATH ?? "portal.sqlite");
   const providers = opts.providers ?? getProviders();
-  const accessTokenSecret = opts.accessTokenSecret ?? process.env.ACCESS_TOKEN_SECRET ?? "dev-secret-change-me";
-  const stateSecret = opts.stateSecret ?? process.env.STATE_SECRET ?? "dev-state-secret-change-me";
+  const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
+  const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
 
   return Bun.serve({
     port: opts.port ?? 3000,
@@ -40,7 +61,7 @@ export function createServer(opts: ServerOptions = {}) {
 
       const loginMatch = url.pathname.match(/^\/auth\/login\/([^/]+)$/);
       if (loginMatch && req.method === "GET") {
-        const provider = providers[loginMatch[1]];
+        const provider = getProvider(providers, loginMatch[1]);
         if (!provider) return json({ error: "unknown provider" }, 404);
         const state = createState(stateSecret);
         const redirectUri = `${url.origin}/auth/callback/${loginMatch[1]}`;
@@ -50,7 +71,7 @@ export function createServer(opts: ServerOptions = {}) {
       const callbackMatch = url.pathname.match(/^\/auth\/callback\/([^/]+)$/);
       if (callbackMatch && req.method === "GET") {
         const providerName = callbackMatch[1];
-        const provider = providers[providerName];
+        const provider = getProvider(providers, providerName);
         if (!provider) return json({ error: "unknown provider" }, 404);
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
@@ -58,26 +79,32 @@ export function createServer(opts: ServerOptions = {}) {
           return json({ error: "invalid state or missing code" }, 400);
         }
         const redirectUri = `${url.origin}/auth/callback/${providerName}`;
-        const providerAccessToken = await exchangeCodeForToken(provider, code, redirectUri);
-        const profile = await fetchUserProfile(provider, providerAccessToken);
-        const user = findOrCreateUser(db, providerName, profile);
-        const accessToken = signAccessToken(user.id, accessTokenSecret);
-        const refreshToken = createRefreshToken(db, user.id);
-        return json({ accessToken, refreshToken, expiresIn: 900 });
+        try {
+          const providerAccessToken = await exchangeCodeForToken(provider, code, redirectUri);
+          const profile = await fetchUserProfile(provider, providerAccessToken);
+          const user = findOrCreateUser(db, providerName, profile);
+          const accessToken = signAccessToken(user.id, accessTokenSecret);
+          const refreshToken = createRefreshToken(db, user.id);
+          return json({ accessToken, refreshToken, expiresIn: 900 });
+        } catch {
+          return json({ error: "oauth exchange failed" }, 502);
+        }
       }
 
       if (url.pathname === "/auth/refresh" && req.method === "POST") {
-        const body = (await req.json()) as { refreshToken?: string };
-        if (!body.refreshToken) return json({ error: "missing refreshToken" }, 400);
-        const result = verifyAndRotateRefreshToken(db, body.refreshToken);
+        const body = await req.json().catch(() => null);
+        const refreshToken = body && typeof body === "object" ? (body as { refreshToken?: unknown }).refreshToken : undefined;
+        if (typeof refreshToken !== "string" || !refreshToken) return json({ error: "missing refreshToken" }, 400);
+        const result = verifyAndRotateRefreshToken(db, refreshToken);
         if (!result) return json({ error: "invalid or expired refresh token" }, 401);
         const accessToken = signAccessToken(result.userId, accessTokenSecret);
         return json({ accessToken, refreshToken: result.newToken, expiresIn: 900 });
       }
 
       if (url.pathname === "/auth/logout" && req.method === "POST") {
-        const body = (await req.json()) as { refreshToken?: string };
-        if (body.refreshToken) revokeRefreshToken(db, body.refreshToken);
+        const body = await req.json().catch(() => null);
+        const refreshToken = body && typeof body === "object" ? (body as { refreshToken?: unknown }).refreshToken : undefined;
+        if (typeof refreshToken === "string" && refreshToken) revokeRefreshToken(db, refreshToken);
         return json({ status: "ok" });
       }
 
