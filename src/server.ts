@@ -233,6 +233,46 @@ export function createServer(opts: ServerOptions = {}) {
         return json({ routes: buildRouteTable(routeIndex), contextOwners: buildContextOwners(contextIndex) });
       }
 
+      const bundleMatch = url.pathname.match(/^\/_scs\/([^/]+)\/bundle\.js$/);
+      if (bundleMatch && req.method === "GET") {
+        const userId = getAuthenticatedUserId(req, accessTokenSecret);
+        if (!userId) return json({ error: "unauthorized" }, 401);
+        const requestedScsName = bundleMatch[1];
+        // Resolved by the manifest's self-declared name, same trust posture
+        // already accepted elsewhere in this codebase for that field (see
+        // specification.md's role-namespace-filtering open question) — first
+        // match wins, bounded by the existing operator-trusted, static
+        // base-URL list.
+        const scsEntry = (manifestRegistry?.getManifests() ?? []).find(
+          (entry) => entry.manifest?.name === requestedScsName && entry.manifest.bundle
+        );
+        if (!scsEntry || !scsEntry.manifest?.bundle) return json({ error: "not found" }, 404);
+        try {
+          const bundleResponse = await fetch(`${scsEntry.baseUrl}${scsEntry.manifest.bundle}`, {
+            redirect: "manual",
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (bundleResponse.status >= 300 && bundleResponse.status < 400) {
+            console.error(`bundle fetch for ${requestedScsName} returned an unexpected redirect`);
+            return json({ error: "scs fetch failed" }, 502);
+          }
+          if (!bundleResponse.ok) {
+            console.error(`bundle fetch for ${requestedScsName} failed with status ${bundleResponse.status}`);
+            return json({ error: "scs fetch failed" }, 502);
+          }
+          const body = await bundleResponse.arrayBuffer();
+          return new Response(body, {
+            status: 200,
+            headers: {
+              "Content-Type": bundleResponse.headers.get("Content-Type") ?? "text/javascript; charset=utf-8",
+            },
+          });
+        } catch (err) {
+          console.error("bundle fetch failed", err);
+          return json({ error: "scs fetch failed" }, 502);
+        }
+      }
+
       if (url.pathname === "/admin/users" && req.method === "GET") {
         const adminCheck = requireAdmin(req);
         if (adminCheck instanceof Response) return adminCheck;

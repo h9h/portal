@@ -50,6 +50,12 @@ beforeEach(async () => {
         }
         return new Response("orders fragment", { status: 200, headers: { "Content-Type": "text/plain" } });
       }
+      if (url.pathname === "/.portal/bundle.js") {
+        return new Response("export const OrdersView = () => null;", {
+          status: 200,
+          headers: { "Content-Type": "text/javascript; charset=utf-8" },
+        });
+      }
       if (url.pathname === "/portal-fragment") {
         receivedAuthHeader = req.headers.get("Authorization");
         receivedSearch = url.search;
@@ -280,5 +286,49 @@ describe("GET /routes", () => {
     });
     const body = (await response.json()) as { contextOwners: Record<string, string> };
     expect(body.contextOwners).toEqual({ orderStatus: "orders" });
+  });
+});
+
+describe("GET /_scs/:scsName/bundle.js", () => {
+  test("an unauthenticated request returns 401", async () => {
+    const response = await fetch(`${portal.url}_scs/orders/bundle.js`);
+    expect(response.status).toBe(401);
+  });
+
+  test("a request for an unknown scsName returns 404", async () => {
+    const response = await fetch(`${portal.url}_scs/unknown-scs/bundle.js`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test("a request for an SCS with no declared bundle returns 404", async () => {
+    // default scsManifest (set in beforeEach) has no bundle field
+    const response = await fetch(`${portal.url}_scs/orders/bundle.js`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test("proxies the SCS's bundle bytes and content-type when declared, with no role check", async () => {
+    scsManifest = { name: "orders", bundle: "/.portal/bundle.js", routes: [], nav: [] } as any;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    // userId/accessToken (from beforeEach) hold no roles at all — bundle fetch must still succeed
+    const response = await fetch(`${portal.url}_scs/orders/bundle.js`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
+    expect(await response.text()).toBe("export const OrdersView = () => null;");
+  });
+
+  test("an unreachable SCS returns a clean 502", async () => {
+    scsManifest = { name: "orders", bundle: "/.portal/bundle.js", routes: [], nav: [] } as any;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    fakeScs.stop(true);
+    const response = await fetch(`${portal.url}_scs/orders/bundle.js`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(502);
   });
 });
