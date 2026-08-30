@@ -1,8 +1,9 @@
 import { describe, test, expect, afterAll } from "bun:test";
 import { createServer } from "../../src/server";
+import { createDatabase } from "../../src/db";
 
 describe("GET /health", () => {
-  const server = createServer({ port: 0 });
+  const server = createServer({ port: 0, db: createDatabase(":memory:") });
   afterAll(() => server.stop());
 
   test("returns ok status", async () => {
