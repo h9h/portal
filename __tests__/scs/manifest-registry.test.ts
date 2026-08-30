@@ -143,6 +143,50 @@ describe("createManifestRegistry", () => {
     expect(brokenEntry.stale).toBe(true);
   });
 
+  test("strips a trailing slash from a configured base URL before fetching", async () => {
+    const scs = startFakeScs((req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/.portal/manifest") {
+        return new Response(JSON.stringify(validManifestJson), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const registry = await createManifestRegistry([`${baseUrlOf(scs)}/`]);
+    registries.push(registry);
+
+    const [entry] = registry.getManifests();
+    expect(entry.manifest).toEqual(validManifestJson);
+    expect(entry.stale).toBe(false);
+  });
+
+  test("deduplicates base URLs that differ only by a trailing slash", async () => {
+    const scs = startFakeScs(() => new Response(JSON.stringify(validManifestJson), { status: 200 }));
+
+    const registry = await createManifestRegistry([baseUrlOf(scs), `${baseUrlOf(scs)}/`]);
+    registries.push(registry);
+
+    expect(registry.getManifests()).toHaveLength(1);
+  });
+
+  test("aborts a hanging fetch after fetchTimeoutMs and marks the SCS stale", async () => {
+    const scs = startFakeScs(async () => {
+      await new Promise(() => {});
+      return new Response("unreachable", { status: 200 });
+    });
+
+    const start = Date.now();
+    const registry = await createManifestRegistry([baseUrlOf(scs)], { fetchTimeoutMs: 50 });
+    registries.push(registry);
+    const elapsed = Date.now() - start;
+
+    const [entry] = registry.getManifests();
+    expect(entry.manifest).toBeNull();
+    expect(entry.stale).toBe(true);
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
   test("stop() prevents further scheduled refreshes", async () => {
     let fetchCount = 0;
     const scs = startFakeScs(() => {

@@ -10,6 +10,7 @@ export type ManifestEntry = {
 export type ManifestRegistryOptions = {
   refreshIntervalMs?: number;
   fetchFn?: typeof fetch;
+  fetchTimeoutMs?: number;
 };
 
 export type ManifestRegistry = {
@@ -31,12 +32,16 @@ export async function createManifestRegistry(
 ): Promise<ManifestRegistry> {
   const fetchFn = opts.fetchFn ?? fetch;
   const refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;
+  const fetchTimeoutMs = opts.fetchTimeoutMs ?? 10_000;
+  const urls = [...new Set(baseUrls.map((u) => u.replace(/\/+$/, "")))];
   const entries = new Map<string, ManifestEntry>();
 
   async function fetchOne(baseUrl: string): Promise<void> {
     const existing = entries.get(baseUrl);
     try {
-      const response = await fetchFn(`${baseUrl}/.portal/manifest`);
+      const response = await fetchFn(`${baseUrl}/.portal/manifest`, {
+        signal: AbortSignal.timeout(fetchTimeoutMs),
+      });
       if (!response.ok) throw new Error(`manifest fetch failed with status ${response.status}`);
       const json = await response.json();
       const manifest = parseManifest(json);
@@ -54,7 +59,7 @@ export async function createManifestRegistry(
   }
 
   async function fetchAll(): Promise<void> {
-    await Promise.all(baseUrls.map(fetchOne));
+    await Promise.all(urls.map(fetchOne));
   }
 
   await fetchAll();
@@ -65,7 +70,7 @@ export async function createManifestRegistry(
 
   return {
     getManifests(): ManifestEntry[] {
-      return baseUrls.map((baseUrl) => entries.get(baseUrl)!);
+      return urls.map((baseUrl) => entries.get(baseUrl)!);
     },
     stop(): void {
       clearInterval(timer);
