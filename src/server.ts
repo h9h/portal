@@ -192,11 +192,20 @@ export function createServer(opts: ServerOptions = {}) {
         if (!provider) return json({ error: "unknown provider" }, 404);
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
+        const shellOrigin = configuredBaseUrl ?? url.origin;
+        // The provider sends its own `error` param (e.g. access_denied) when
+        // the user cancels on its consent screen — a normal user action, not
+        // a malformed/forged request. Hand it to the shell's existing
+        // #error= screen instead of returning raw JSON. Checked before the
+        // code/state check below, which stays reserved for genuinely
+        // malformed or forged callback requests.
+        if (url.searchParams.get("error")) {
+          return Response.redirect(`${shellOrigin}/#error=oauth_failed`, 302);
+        }
         if (!code || !state || !verifyState(state, stateSecret)) {
           return json({ error: "invalid state or missing code" }, 400);
         }
         const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${providerName}`;
-        const shellOrigin = configuredBaseUrl ?? url.origin;
         try {
           const providerAccessToken = await exchangeCodeForToken(provider, code, redirectUri);
           const profile = await fetchUserProfile(provider, providerAccessToken);

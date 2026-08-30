@@ -30,9 +30,23 @@ export function storeTokens(session: StoredSession): void {
 }
 
 export function clearTokens(): void {
+  sessionEpoch += 1;
   try {
     sessionStorage.removeItem(STORAGE_KEY);
   } catch {
     // see comment above
   }
+}
+
+// Bumped by clearTokens() so an in-flight refresh (see refreshTokens() in
+// fetch.ts) can detect a logout that happened underneath it and skip writing
+// stale tokens back. auth.ts is compiled into two separate browser bundles
+// (runtime.js, via fetch.ts/logout.ts; and shell.js, via shell-entry.tsx's
+// own relative import), but this only needs clearTokens() and
+// refreshTokens()'s epoch check to share one compiled copy — and both are
+// reached via runtime.js's own import graph, so they do.
+let sessionEpoch = 0;
+
+export function getSessionEpoch(): number {
+  return sessionEpoch;
 }

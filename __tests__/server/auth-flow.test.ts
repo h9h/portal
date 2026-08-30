@@ -153,6 +153,28 @@ describe("full login flow", () => {
     expect(response.status).toBe(400);
   });
 
+  test("callback with a provider error (e.g. a cancelled sign-in) redirects to the shell's error screen", async () => {
+    const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
+    const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+
+    const callbackResponse = await fetch(
+      `${portal.url}auth/callback/fake?error=access_denied&state=${encodeURIComponent(state)}`,
+      { redirect: "manual" }
+    );
+    expect(callbackResponse.status).toBe(302);
+    const location = new URL(callbackResponse.headers.get("Location")!);
+    expect(location.pathname).toBe("/");
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    expect(fragment.get("error")).toBe("oauth_failed");
+  });
+
+  test("callback with no provider error and no code/valid state still returns 400 JSON, not a redirect", async () => {
+    const response = await fetch(`${portal.url}auth/callback/fake?state=garbage`, { redirect: "manual" });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe("invalid state or missing code");
+  });
+
   test("refresh issues a new access token and rotates the refresh token", async () => {
     const { refreshToken } = await loginAndGetTokens();
 
@@ -316,6 +338,13 @@ describe("end-to-end: portalFetch transparently refreshes an expired access toke
     const userId = JSON.parse(Buffer.from(accessToken.split(".")[1], "base64url").toString("utf8")).sub as string;
     const expiredAccessToken = signAccessToken(userId, "access-secret", -1);
     storeTokens({ accessToken: expiredAccessToken, refreshToken });
+
+    // portalFetch now only attaches Authorization to same-origin requests
+    // (see the cross-origin-leak fix in src/runtime/fetch.ts). Point
+    // happy-dom's own window.location at the real portal server's origin so
+    // this absolute-URL call is genuinely same-origin, matching what a real
+    // browser sees when the shell and Portal's API share one origin.
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(portal.url.toString());
 
     const response = await portalFetch(`${portal.url}me`);
     expect(response.status).toBe(200);

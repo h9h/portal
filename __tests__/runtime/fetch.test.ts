@@ -1,8 +1,18 @@
-import { describe, test, expect, mock, afterEach } from "bun:test";
+import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
 import { portalFetch } from "../../src/runtime/fetch";
 import { withDom } from "../helpers/dom";
 
 withDom();
+
+// happy-dom defaults to "about:blank" (origin "null"), against which
+// portalFetch's same-origin check for Authorization (see the cross-origin
+// fix in src/runtime/fetch.ts) can't resolve even a relative path. Give
+// every test in this file a fixed same-origin baseline, matching the
+// `window.happyDOM.setURL` precedent already established in
+// __tests__/frontend/shell-entry.test.tsx and __tests__/runtime/navigate.test.tsx.
+beforeEach(() => {
+  (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL("https://portal.example/");
+});
 
 afterEach(() => {
   sessionStorage.clear();
@@ -159,6 +169,52 @@ describe("portalFetch — Authorization + refresh", () => {
     }
   });
 
+  test("does not attach Authorization when the target URL is cross-origin, even with a token stored", async () => {
+    const { storeTokens } = await import("../../src/runtime/auth");
+    storeTokens({ accessToken: "access-1", refreshToken: "refresh-1" });
+
+    const originalFetch = globalThis.fetch;
+    const calls: RequestInit[] = [];
+    globalThis.fetch = mock((_input: any, init?: RequestInit) => {
+      calls.push(init!);
+      return Promise.resolve(new Response("ok"));
+    }) as unknown as typeof fetch;
+
+    try {
+      const { portalFetch } = await import("../../src/runtime/fetch");
+      // window.location is https://portal.example/ (see beforeEach above);
+      // this target is a different origin entirely.
+      await portalFetch("https://third-party.example/api/data");
+      const headers = new Headers(calls[0].headers);
+      expect(headers.has("Authorization")).toBe(false);
+      // The marker header is unrelated to the auth leak and still applies.
+      expect(headers.get("X-Portal-Data")).toBe("1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("still attaches Authorization for a same-origin absolute URL", async () => {
+    const { storeTokens } = await import("../../src/runtime/auth");
+    storeTokens({ accessToken: "access-1", refreshToken: "refresh-1" });
+
+    const originalFetch = globalThis.fetch;
+    const calls: RequestInit[] = [];
+    globalThis.fetch = mock((_input: any, init?: RequestInit) => {
+      calls.push(init!);
+      return Promise.resolve(new Response("ok"));
+    }) as unknown as typeof fetch;
+
+    try {
+      const { portalFetch } = await import("../../src/runtime/fetch");
+      await portalFetch("https://portal.example/orders");
+      const headers = new Headers(calls[0].headers);
+      expect(headers.get("Authorization")).toBe("Bearer access-1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("two concurrent 401s share one in-flight refresh instead of each calling /auth/refresh", async () => {
     const { storeTokens } = await import("../../src/runtime/auth");
     storeTokens({ accessToken: "expired", refreshToken: "refresh-1" });
@@ -192,6 +248,76 @@ describe("portalFetch — Authorization + refresh", () => {
       expect(firstResponse.status).toBe(200);
       expect(secondResponse.status).toBe(200);
       expect(refreshCallCount).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("a refresh whose write lands normally (no logout mid-flight) still stores the new tokens", async () => {
+    const { storeTokens, getStoredTokens } = await import("../../src/runtime/auth");
+    storeTokens({ accessToken: "expired", refreshToken: "refresh-1" });
+
+    const originalFetch = globalThis.fetch;
+    let resolveRefresh: (() => void) | null = null;
+    const refreshGate = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    globalThis.fetch = mock(async (input: any, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/auth/refresh") {
+        await refreshGate; // hold the refresh open so the test controls exactly when it resolves
+        return new Response(JSON.stringify({ accessToken: "fresh", refreshToken: "refresh-2" }), { status: 200 });
+      }
+      const headers = new Headers(init?.headers);
+      if (headers.get("Authorization") === "Bearer expired") return new Response("unauthorized", { status: 401 });
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const { portalFetch } = await import("../../src/runtime/fetch");
+      const pending = portalFetch("/orders");
+      // give the call a chance to hit its initial 401 and start refreshing
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      resolveRefresh!(); // no logout happened while this was in flight
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(getStoredTokens()).toEqual({ accessToken: "fresh", refreshToken: "refresh-2" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("a refresh that resolves AFTER clearTokens() ran mid-flight (a logout) does not resurrect the session", async () => {
+    const { storeTokens, getStoredTokens, clearTokens } = await import("../../src/runtime/auth");
+    storeTokens({ accessToken: "expired", refreshToken: "refresh-1" });
+
+    const originalFetch = globalThis.fetch;
+    let resolveRefresh: (() => void) | null = null;
+    const refreshGate = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    globalThis.fetch = mock(async (input: any, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/auth/refresh") {
+        await refreshGate; // hold the refresh open so the test controls exactly when it resolves
+        return new Response(JSON.stringify({ accessToken: "fresh", refreshToken: "refresh-2" }), { status: 200 });
+      }
+      const headers = new Headers(init?.headers);
+      if (headers.get("Authorization") === "Bearer expired") return new Response("unauthorized", { status: 401 });
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const { portalFetch } = await import("../../src/runtime/fetch");
+      const pending = portalFetch("/orders");
+      // give the call a chance to hit its initial 401 and start refreshing
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      clearTokens(); // simulates usePortalLogout() running while the refresh is in flight
+      resolveRefresh!();
+      const response = await pending;
+      // the caller just sees the original 401 — the right outcome for a user who just logged out
+      expect(response.status).toBe(401);
+      expect(getStoredTokens()).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }
