@@ -9,6 +9,7 @@ import { buildAuthorizeUrl, exchangeCodeForToken, fetchUserProfile } from "./aut
 import { getAuthenticatedUserId } from "./auth/middleware";
 import { buildRouteIndex, checkAccess, type RouteIndex } from "./rights/route-access";
 import { getUserRoles } from "./rights/roles";
+import { buildNav } from "./rights/nav";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
 
@@ -165,7 +166,15 @@ export function createServer(opts: ServerOptions = {}) {
           | { id: string; provider: string; providerUserId: string; email: string | null; displayName: string | null }
           | null;
         if (!row) return json({ error: "unauthorized" }, 401);
-        return json({ ...row, roles: [] });
+        return json({ ...row, roles: getUserRoles(db, userId) });
+      }
+
+      if (url.pathname === "/nav" && req.method === "GET") {
+        const userId = getAuthenticatedUserId(req, accessTokenSecret);
+        if (!userId) return json({ error: "unauthorized" }, 401);
+        const userRoles = getUserRoles(db, userId);
+        const nav = manifestRegistry ? buildNav(manifestRegistry.getManifests(), userRoles) : [];
+        return json({ nav });
       }
 
       if (manifestRegistry && req.method === "GET") {
