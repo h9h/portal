@@ -22,12 +22,24 @@ Portal is a backend-for-frontend that composes pages server-side from one or mor
 
 ### SCS manifest contract
 
-Each SCS exposes a manifest endpoint (e.g. `GET /.portal/manifest`) that Portal fetches at startup and periodically thereafter. The manifest declares, for that SCS:
-- the routes/fragments it serves
-- the nav menu entries it contributes, and which domain/context they belong to
-- the role(s) required for each route and nav entry
+Each SCS exposes a manifest endpoint (`GET /.portal/manifest`) that Portal fetches at startup and periodically thereafter. The manifest declares, for that SCS:
+- `name`: the SCS's identity, used for role namespacing (e.g. `orders` → roles like `orders:admin`)
+- `routes`: the routes/fragments it serves, each with its required role(s)
+- `nav`: the nav menu entries it contributes, each with its required role(s)
 
-Portal has no built-in knowledge of any SCS's routes, nav entries, or roles beyond what the manifest declares — adding a new SCS means registering its manifest, not changing Portal's code.
+```json
+{
+  "name": "orders",
+  "routes": [{ "path": "/orders", "requiredRoles": ["orders:viewer"] }],
+  "nav": [{ "label": "Orders", "path": "/orders", "requiredRoles": ["orders:viewer"] }]
+}
+```
+
+Portal has no built-in knowledge of any SCS's routes, nav entries, or roles beyond what the manifest declares — adding a new SCS means registering its manifest, not changing Portal's code. A nav entry's domain/context (see Context model below) is the owning SCS's own `name` — one SCS, one domain, for this stage; an SCS contributing to multiple domains is future scope if it turns out to be needed.
+
+**Discovery**: Portal is configured with a static list of known SCS base URLs (e.g. `PORTAL_SCS_URLS`, comma-separated); it appends `/.portal/manifest` to each to fetch. Adding an SCS means adding it to this list, not building a self-registration mechanism (deferred as unnecessary complexity for this stage).
+
+**Fetch and failure handling**: Portal fetches every configured SCS's manifest at startup and on a fixed refresh interval thereafter. A malformed response is treated the same as an unreachable SCS: Portal logs the failure, keeps serving the last-known-good manifest it has for that SCS (or nothing, if it has never successfully fetched one), and marks that SCS's data as stale. A transient failure in one SCS doesn't remove its routes or nav entries from users mid-session.
 
 ### Identity, sessions, and rights
 
