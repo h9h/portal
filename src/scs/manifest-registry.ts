@@ -15,6 +15,7 @@ export type ManifestRegistryOptions = {
 
 export type ManifestRegistry = {
   getManifests(): ManifestEntry[];
+  onUpdate(listener: () => void): () => void;
   stop(): void;
 };
 
@@ -35,6 +36,7 @@ export async function createManifestRegistry(
   const fetchTimeoutMs = opts.fetchTimeoutMs ?? 10_000;
   const urls = [...new Set(baseUrls.map((u) => u.replace(/\/+$/, "")))];
   const entries = new Map<string, ManifestEntry>();
+  const listeners = new Set<() => void>();
 
   async function fetchOne(baseUrl: string): Promise<void> {
     const existing = entries.get(baseUrl);
@@ -60,6 +62,7 @@ export async function createManifestRegistry(
 
   async function fetchAll(): Promise<void> {
     await Promise.all(urls.map(fetchOne));
+    for (const listener of listeners) listener();
   }
 
   await fetchAll();
@@ -71,6 +74,10 @@ export async function createManifestRegistry(
   return {
     getManifests(): ManifestEntry[] {
       return urls.map((baseUrl) => entries.get(baseUrl)!);
+    },
+    onUpdate(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     stop(): void {
       clearInterval(timer);

@@ -187,6 +187,45 @@ describe("createManifestRegistry", () => {
     expect(elapsed).toBeLessThan(1000);
   });
 
+  test("calls onUpdate listeners after each successful refresh, but not for the initial fetch", async () => {
+    const scs = startFakeScs(() => new Response(JSON.stringify(validManifestJson), { status: 200 }));
+
+    const registry = await createManifestRegistry([baseUrlOf(scs)], { refreshIntervalMs: 20 });
+    registries.push(registry);
+
+    let updateCount = 0;
+    registry.onUpdate(() => {
+      updateCount++;
+    });
+
+    expect(updateCount).toBe(0);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(updateCount).toBeGreaterThanOrEqual(2);
+  });
+
+  test("onUpdate's returned unsubscribe function stops further notifications", async () => {
+    const scs = startFakeScs(() => new Response(JSON.stringify(validManifestJson), { status: 200 }));
+
+    const registry = await createManifestRegistry([baseUrlOf(scs)], { refreshIntervalMs: 20 });
+    registries.push(registry);
+
+    let updateCount = 0;
+    const unsubscribe = registry.onUpdate(() => {
+      updateCount++;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(updateCount).toBeGreaterThanOrEqual(1);
+
+    unsubscribe();
+    const countAfterUnsubscribe = updateCount;
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(updateCount).toBe(countAfterUnsubscribe);
+  });
+
   test("stop() prevents further scheduled refreshes", async () => {
     let fetchCount = 0;
     const scs = startFakeScs(() => {
