@@ -8,7 +8,7 @@ import { getProviders, type OAuthProviderConfig } from "./auth/providers";
 import { buildAuthorizeUrl, exchangeCodeForToken, fetchUserProfile } from "./auth/oauth-client";
 import { getAuthenticatedUserId } from "./auth/middleware";
 import { buildRouteIndex, checkAccess, type RouteIndex } from "./rights/route-access";
-import { getUserRoles } from "./rights/roles";
+import { assignRole, getUserRoles } from "./rights/roles";
 import { buildNav } from "./rights/nav";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
@@ -22,6 +22,7 @@ export type ServerOptions = {
   internalTokenSecret?: string;
   baseUrl?: string;
   manifestRegistry?: ManifestRegistry;
+  adminEmails?: string[];
 };
 
 function json(body: unknown, status = 200): Response {
@@ -36,6 +37,14 @@ function json(body: unknown, status = 200): Response {
 function getProvider(providers: Record<string, OAuthProviderConfig>, name: string): OAuthProviderConfig | undefined {
   if (!Object.prototype.hasOwnProperty.call(providers, name)) return undefined;
   return providers[name];
+}
+
+function parseAdminEmails(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 // Resolves a signing secret from explicit opts, then env, then a dev default.
@@ -58,6 +67,7 @@ export function createServer(opts: ServerOptions = {}) {
   const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
   const configuredBaseUrl = (opts.baseUrl ?? process.env.PORTAL_BASE_URL)?.replace(/\/+$/, "");
+  const adminEmails = opts.adminEmails ?? parseAdminEmails(process.env.PORTAL_ADMIN_EMAILS);
   const manifestRegistry = opts.manifestRegistry;
   // internalTokenSecret is only resolved (and only reads INTERNAL_TOKEN_SECRET
   // / warns / can throw in production) when a manifestRegistry is actually
@@ -128,6 +138,9 @@ export function createServer(opts: ServerOptions = {}) {
           const providerAccessToken = await exchangeCodeForToken(provider, code, redirectUri);
           const profile = await fetchUserProfile(provider, providerAccessToken);
           const user = findOrCreateUser(db, providerName, profile);
+          if (user.email && adminEmails.includes(user.email)) {
+            assignRole(db, user.id, "portal:admin");
+          }
           const accessToken = signAccessToken(user.id, accessTokenSecret);
           const refreshToken = createRefreshToken(db, user.id);
           return json({ accessToken, refreshToken, expiresIn: 900 });
