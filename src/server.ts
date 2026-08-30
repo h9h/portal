@@ -7,6 +7,10 @@ import { createState, verifyState } from "./auth/state";
 import { getProviders, type OAuthProviderConfig } from "./auth/providers";
 import { buildAuthorizeUrl, exchangeCodeForToken, fetchUserProfile } from "./auth/oauth-client";
 import { getAuthenticatedUserId } from "./auth/middleware";
+import { buildRouteIndex, checkAccess, type RouteIndex } from "./rights/route-access";
+import { getUserRoles } from "./rights/roles";
+import { signInternalToken } from "./auth/internal-tokens";
+import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
 
 export type ServerOptions = {
   port?: number;
@@ -14,7 +18,9 @@ export type ServerOptions = {
   providers?: Record<string, OAuthProviderConfig>;
   accessTokenSecret?: string;
   stateSecret?: string;
+  internalTokenSecret?: string;
   baseUrl?: string;
+  manifestRegistry?: ManifestRegistry;
 };
 
 function json(body: unknown, status = 200): Response {
@@ -51,6 +57,18 @@ export function createServer(opts: ServerOptions = {}) {
   const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
   const configuredBaseUrl = (opts.baseUrl ?? process.env.PORTAL_BASE_URL)?.replace(/\/+$/, "");
+  const internalTokenSecret = resolveSecret(
+    opts.internalTokenSecret,
+    "INTERNAL_TOKEN_SECRET",
+    "dev-internal-secret-change-me"
+  );
+  const manifestRegistry = opts.manifestRegistry;
+  let routeIndex: RouteIndex = manifestRegistry
+    ? buildRouteIndex(manifestRegistry.getManifests())
+    : { routes: new Map(), collisions: [] };
+  manifestRegistry?.onUpdate(() => {
+    routeIndex = buildRouteIndex(manifestRegistry.getManifests());
+  });
 
   return Bun.serve({
     port: opts.port ?? 3000,
@@ -126,12 +144,53 @@ export function createServer(opts: ServerOptions = {}) {
         return json({ ...row, roles: [] });
       }
 
+      if (manifestRegistry && req.method === "GET") {
+        const normalizedPath = url.pathname === "/" ? url.pathname : url.pathname.replace(/\/+$/, "");
+        const userId = getAuthenticatedUserId(req, accessTokenSecret);
+        if (!userId) return json({ error: "unauthorized" }, 401);
+
+        const userRoles = getUserRoles(db, userId);
+        const result = checkAccess(routeIndex, normalizedPath, userRoles);
+
+        if (result.status === "forbidden") {
+          console.error(
+            `forbidden: user ${userId} missing one of [${result.requiredRoles.join(", ")}] for ${normalizedPath}`
+          );
+          return json({ error: "forbidden" }, 403);
+        }
+
+        if (result.status === "allowed") {
+          const route = routeIndex.routes.get(normalizedPath)!;
+          const scsRoles = userRoles.filter((role) => role.startsWith(`${route.scsName}:`));
+          const internalToken = signInternalToken(userId, scsRoles, internalTokenSecret);
+          try {
+            const fragmentResponse = await fetch(`${route.baseUrl}${normalizedPath}${url.search}`, {
+              headers: { Authorization: `Bearer ${internalToken}` },
+            });
+            const body = await fragmentResponse.arrayBuffer();
+            return new Response(body, {
+              status: fragmentResponse.status,
+              headers: {
+                "Content-Type": fragmentResponse.headers.get("Content-Type") ?? "application/octet-stream",
+              },
+            });
+          } catch (err) {
+            console.error("scs fragment fetch failed", err);
+            return json({ error: "scs fetch failed" }, 502);
+          }
+        }
+
+        // result.status === "not_found": fall through to the 404 below.
+      }
+
       return json({ error: "not found" }, 404);
     },
   });
 }
 
 if (import.meta.main) {
-  const server = createServer({ port: Number(process.env.PORT ?? 3000) });
+  const scsBaseUrls = parseScsBaseUrls(process.env.PORTAL_SCS_URLS);
+  const manifestRegistry = scsBaseUrls.length > 0 ? await createManifestRegistry(scsBaseUrls) : undefined;
+  const server = createServer({ port: Number(process.env.PORT ?? 3000), manifestRegistry });
   console.log(`Portal listening on ${server.url}`);
 }
