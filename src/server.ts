@@ -14,6 +14,7 @@ import { buildContextIndex, type ContextIndex } from "./rights/context-index";
 import { buildRouteTable, buildContextOwners } from "./shell/route-table";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
+import { renderShellHtml } from "./shell/bootstrap-html";
 
 export type ServerOptions = {
   port?: number;
@@ -306,6 +307,18 @@ export function createServer(opts: ServerOptions = {}) {
         if (!role) return json({ error: "missing role" }, 400);
         revokeRole(db, targetUserId, role);
         return json({ userId: targetUserId, roles: getUserRoles(db, targetUserId) });
+      }
+
+      // Page navigation: any GET without the shell's data-marker header, that
+      // didn't match one of Portal's own fixed routes above, always gets the
+      // shell bootstrap HTML — any path, any auth state. See specification.md's
+      // Request flow section for why this replaced the old "401 before the
+      // route index is even consulted" behavior for page loads specifically.
+      if (req.method === "GET" && req.headers.get("X-Portal-Data") !== "1") {
+        return new Response(renderShellHtml(), {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
       }
 
       if (manifestRegistry && req.method === "GET") {

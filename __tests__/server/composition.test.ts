@@ -90,13 +90,15 @@ afterEach(() => {
 
 describe("route composition", () => {
   test("an unauthenticated request to an enforceable route returns 401", async () => {
-    const response = await fetch(`${portal.url}orders`);
+    const response = await fetch(`${portal.url}orders`, {
+      headers: { "X-Portal-Data": "1" },
+    });
     expect(response.status).toBe(401);
   });
 
   test("an authenticated request without the required role returns a generic 403", async () => {
     const response = await fetch(`${portal.url}orders`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(403);
     const body = (await response.json()) as { error: string; requiredRoles?: unknown };
@@ -108,7 +110,7 @@ describe("route composition", () => {
     assignRole(db, userId, "orders:admin");
 
     const response = await fetch(`${portal.url}orders`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("text/plain");
@@ -128,7 +130,9 @@ describe("route composition", () => {
     assignRole(db, userId, "billing:admin");
     assignRole(db, userId, "orders-legacy:admin");
 
-    await fetch(`${portal.url}orders`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    await fetch(`${portal.url}orders`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
 
     const internalToken = receivedAuthHeader!.slice("Bearer ".length);
     const payload = verifyInternalToken(internalToken, INTERNAL_SECRET);
@@ -142,7 +146,9 @@ describe("route composition", () => {
     await new Promise((resolve) => setTimeout(resolve, 40));
     assignRole(db, userId, "portal:admin");
 
-    await fetch(`${portal.url}portal-fragment`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    await fetch(`${portal.url}portal-fragment`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
 
     const internalToken = receivedAuthHeader!.slice("Bearer ".length);
     const payload = verifyInternalToken(internalToken, INTERNAL_SECRET);
@@ -151,7 +157,7 @@ describe("route composition", () => {
 
   test("a path no manifest declares returns 404", async () => {
     const response = await fetch(`${portal.url}unknown`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(404);
   });
@@ -160,7 +166,7 @@ describe("route composition", () => {
     assignRole(db, userId, "orders:admin");
 
     const response = await fetch(`${portal.url}orders/`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(200);
   });
@@ -169,7 +175,7 @@ describe("route composition", () => {
     assignRole(db, userId, "orders:admin");
 
     const response = await fetch(`${portal.url}orders?page=2`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(200);
     expect(receivedSearch).toBe("?page=2");
@@ -180,20 +186,24 @@ describe("route composition", () => {
     await new Promise((resolve) => setTimeout(resolve, 40));
 
     const response = await fetch(`${portal.url}orders`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(200);
   });
 
   test("the cached route index reflects a manifest change after the registry refreshes", async () => {
     assignRole(db, userId, "orders:admin");
-    const before = await fetch(`${portal.url}orders`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const before = await fetch(`${portal.url}orders`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
     expect(before.status).toBe(200);
 
     scsManifest = { name: "orders", routes: [{ path: "/orders", requiredRoles: ["orders:superadmin"] }], nav: [] };
     await new Promise((resolve) => setTimeout(resolve, 40));
 
-    const after = await fetch(`${portal.url}orders`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const after = await fetch(`${portal.url}orders`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
     expect(after.status).toBe(403);
   });
 
@@ -213,7 +223,7 @@ describe("route composition", () => {
     fakeScs.stop(true);
 
     const response = await fetch(`${portal.url}orders`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(502);
     const body = (await response.json()) as { error: string };
@@ -233,11 +243,38 @@ describe("route composition", () => {
     ordersRedirectTo = "https://example.com/attacker-controlled";
 
     const response = await fetch(`${portal.url}orders`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
     });
     expect(response.status).toBe(502);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBeTruthy();
+  });
+});
+
+describe("page navigation (no X-Portal-Data header)", () => {
+  test("an unauthenticated GET to an enforceable path returns the shell HTML, not 401", async () => {
+    const response = await fetch(`${portal.url}orders`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/html");
+    expect(await response.text()).toContain('id="portal-root"');
+  });
+
+  test("an authenticated GET to an enforceable path also returns the shell HTML", async () => {
+    const response = await fetch(`${portal.url}orders`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('id="portal-root"');
+  });
+
+  test("a totally unknown path also returns the shell HTML (SPA fallback)", async () => {
+    const response = await fetch(`${portal.url}this-path-has-no-route`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('id="portal-root"');
+  });
+
+  test("root path returns the shell HTML", async () => {
+    const response = await fetch(portal.url.toString());
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('id="portal-root"');
   });
 });
 

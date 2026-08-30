@@ -137,15 +137,19 @@ describe("nav and route enforcement agree", () => {
 
     try {
       const authHeaders = { headers: { Authorization: `Bearer ${ordersAccessToken}` } };
+      // These composed routes (/orders/public, /orders/admin) are enforced via
+      // Portal's data-fetch flow, which requires the marker header — see
+      // Task 8's content-negotiation split in src/server.ts.
+      const dataHeaders = { headers: { Authorization: `Bearer ${ordersAccessToken}`, "X-Portal-Data": "1" } };
 
       const navBefore = await fetch(`${ordersPortal.url}nav`, authHeaders);
       const navBeforeBody = (await navBefore.json()) as { nav: { label: string; path: string; domain: string }[] };
       expect(navBeforeBody.nav).toEqual([{ label: "Orders Public", path: "/orders/public", domain: "orders" }]);
 
-      const publicBefore = await fetch(`${ordersPortal.url}orders/public`, authHeaders);
+      const publicBefore = await fetch(`${ordersPortal.url}orders/public`, dataHeaders);
       expect(publicBefore.status).toBe(200);
 
-      const adminBefore = await fetch(`${ordersPortal.url}orders/admin`, authHeaders);
+      const adminBefore = await fetch(`${ordersPortal.url}orders/admin`, dataHeaders);
       expect(adminBefore.status).toBe(403);
 
       assignRole(ordersDb, ordersUser.id, "orders:admin");
@@ -157,7 +161,7 @@ describe("nav and route enforcement agree", () => {
         { label: "Orders Public", path: "/orders/public", domain: "orders" },
       ]);
 
-      const adminAfter = await fetch(`${ordersPortal.url}orders/admin`, authHeaders);
+      const adminAfter = await fetch(`${ordersPortal.url}orders/admin`, dataHeaders);
       expect(adminAfter.status).toBe(200);
     } finally {
       ordersPortal.stop();
