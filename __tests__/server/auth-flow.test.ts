@@ -59,8 +59,16 @@ afterAll(() => {
 async function loginAndGetTokens() {
   const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
   const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
-  const callbackResponse = await fetch(`${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`);
-  return callbackResponse.json() as Promise<{ accessToken: string; refreshToken: string }>;
+  const callbackResponse = await fetch(
+    `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
+    { redirect: "manual" }
+  );
+  const location = new URL(callbackResponse.headers.get("Location")!);
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  return {
+    accessToken: fragment.get("access_token")!,
+    refreshToken: fragment.get("refresh_token")!,
+  };
 }
 
 describe("full login flow", () => {
@@ -84,6 +92,23 @@ describe("full login flow", () => {
     expect(me.email).toBe("octocat@example.com");
     expect(me.provider).toBe("fake");
     expect(me.roles).toEqual([]);
+  });
+
+  test("callback with a valid code and state redirects to / with the token pair in the URL fragment", async () => {
+    const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
+    const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+
+    const callbackResponse = await fetch(
+      `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
+      { redirect: "manual" }
+    );
+    expect(callbackResponse.status).toBe(302);
+    const location = new URL(callbackResponse.headers.get("Location")!);
+    expect(location.pathname).toBe("/");
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    expect(fragment.get("access_token")).toBeTruthy();
+    expect(fragment.get("refresh_token")).toBeTruthy();
+    expect(fragment.get("expires_in")).toBe("900");
   });
 
   test("callback rejects an invalid state", async () => {
@@ -219,20 +244,19 @@ describe("full login flow", () => {
     }
   });
 
-  test("callback with a bad code returns a clean error, not a crash", async () => {
+  test("callback with a bad code redirects to the shell with an error, not a crash", async () => {
     const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
     const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
 
     const callbackResponse = await fetch(
-      `${portal.url}auth/callback/fake?code=wrong-code&state=${encodeURIComponent(state)}`
+      `${portal.url}auth/callback/fake?code=wrong-code&state=${encodeURIComponent(state)}`,
+      { redirect: "manual" }
     );
-    // 502: a clean JSON error reporting the upstream (provider) failure —
-    // not Bun's HTML stack-trace crash page (which would be a 500 with
-    // Content-Type text/html).
-    expect(callbackResponse.status).toBe(502);
-    expect(callbackResponse.headers.get("Content-Type")).toBe("application/json");
-    const body = (await callbackResponse.json()) as { error: string };
-    expect(body.error).toBeTruthy();
+    expect(callbackResponse.status).toBe(302);
+    const location = new URL(callbackResponse.headers.get("Location")!);
+    expect(location.pathname).toBe("/");
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    expect(fragment.get("error")).toBe("oauth_failed");
   });
 });
 

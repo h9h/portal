@@ -45,8 +45,13 @@ afterAll(() => {
 async function login(portal: ReturnType<typeof createServer>) {
   const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
   const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
-  const callbackResponse = await fetch(`${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`);
-  return callbackResponse.json() as Promise<{ accessToken: string }>;
+  const callbackResponse = await fetch(
+    `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
+    { redirect: "manual" }
+  );
+  const location = new URL(callbackResponse.headers.get("Location")!);
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  return { accessToken: fragment.get("access_token")! };
 }
 
 describe("admin bootstrap on login", () => {

@@ -196,6 +196,7 @@ export function createServer(opts: ServerOptions = {}) {
           return json({ error: "invalid state or missing code" }, 400);
         }
         const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${providerName}`;
+        const shellOrigin = configuredBaseUrl ?? url.origin;
         try {
           const providerAccessToken = await exchangeCodeForToken(provider, code, redirectUri);
           const profile = await fetchUserProfile(provider, providerAccessToken);
@@ -205,10 +206,22 @@ export function createServer(opts: ServerOptions = {}) {
           }
           const accessToken = signAccessToken(user.id, accessTokenSecret);
           const refreshToken = createRefreshToken(db, user.id);
-          return json({ accessToken, refreshToken, expiresIn: 900 });
+          // A real browser navigation lands here — under the page/data-fetch
+          // split, a bare navigation only ever gets served the shell HTML, so
+          // a JSON body would just be shown as raw text with nothing able to
+          // read it. Hand the tokens off via the URL fragment instead: never
+          // sent to the server on the request that follows, so it doesn't
+          // appear in logs or get forwarded via Referer. The shell reads and
+          // clears this on boot (see shell-entry.tsx, Task 6).
+          const fragment = new URLSearchParams({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            expires_in: "900",
+          });
+          return Response.redirect(`${shellOrigin}/#${fragment}`, 302);
         } catch (err) {
           console.error("oauth callback failed", err);
-          return json({ error: "oauth exchange failed" }, 502);
+          return Response.redirect(`${shellOrigin}/#error=oauth_failed`, 302);
         }
       }
 
