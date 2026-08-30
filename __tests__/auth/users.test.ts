@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { createDatabase } from "../../src/db";
-import { findOrCreateUser } from "../../src/auth/users";
+import { findOrCreateUser, findUserById, listUsers } from "../../src/auth/users";
 
 describe("findOrCreateUser", () => {
   test("creates a new user on first login", () => {
@@ -44,5 +44,47 @@ describe("findOrCreateUser", () => {
       displayName: "B",
     });
     expect(otherUser.id).not.toBe(githubUser.id);
+  });
+});
+
+describe("findUserById", () => {
+  test("returns null for an unknown id", () => {
+    const db = createDatabase(":memory:");
+    expect(findUserById(db, "does-not-exist")).toBeNull();
+  });
+
+  test("returns the user for a known id", () => {
+    const db = createDatabase(":memory:");
+    const created = findOrCreateUser(db, "github", {
+      providerUserId: "1",
+      email: "octocat@example.com",
+      displayName: "The Octocat",
+    });
+    const found = findUserById(db, created.id);
+    expect(found).toEqual(created);
+  });
+});
+
+describe("listUsers", () => {
+  test("returns an empty array when there are no users", () => {
+    const db = createDatabase(":memory:");
+    expect(listUsers(db)).toEqual([]);
+  });
+
+  test("returns every user", () => {
+    const db = createDatabase(":memory:");
+    const a = findOrCreateUser(db, "github", { providerUserId: "1", email: "a@example.com", displayName: "A" });
+    const b = findOrCreateUser(db, "github", { providerUserId: "2", email: "b@example.com", displayName: "B" });
+    const users = listUsers(db);
+    expect(users).toHaveLength(2);
+    expect(users.map((u) => u.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  test("returns users in creation order", () => {
+    const db = createDatabase(":memory:");
+    const first = findOrCreateUser(db, "github", { providerUserId: "1", email: "a@example.com", displayName: "A" });
+    const second = findOrCreateUser(db, "github", { providerUserId: "2", email: "b@example.com", displayName: "B" });
+    const users = listUsers(db);
+    expect(users.map((u) => u.id)).toEqual([first.id, second.id]);
   });
 });

@@ -32,3 +32,21 @@ export function findOrCreateUser(db: Database, provider: string, profile: Provid
 
   return { id, provider, providerUserId: profile.providerUserId, email: profile.email, displayName: profile.displayName };
 }
+
+export function findUserById(db: Database, id: string): User | null {
+  return db
+    .query(
+      `SELECT id, provider, provider_user_id as providerUserId, email, display_name as displayName
+       FROM users WHERE id = ?`
+    )
+    .get(id) as User | null;
+}
+
+export function listUsers(db: Database): User[] {
+  return db
+    .query(
+      `SELECT id, provider, provider_user_id as providerUserId, email, display_name as displayName
+       FROM users ORDER BY created_at`
+    )
+    .all() as User[];
+}
