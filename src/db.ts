@@ -21,5 +21,12 @@ export function createDatabase(path: string = "portal.sqlite"): Database {
       FOREIGN KEY(user_id) REFERENCES users(id)
     );
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_roles (
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      PRIMARY KEY (user_id, role)
+    );
+  `);
   return db;
 }
