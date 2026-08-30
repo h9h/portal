@@ -64,6 +64,8 @@ Portal serves a single client shell: a small React application, bootstrapped onc
 
 **Data endpoints**: a mounted component fetches its own data by calling whatever paths its own manifest declared under `routes` (with or without a `component`) via the `@portal/runtime` fetch helper — this reuses the existing composition/proxy mechanism unchanged, just marked as a data request rather than a page navigation.
 
+**Client-side navigation**: `@portal/runtime` exposes `usePortalNavigate()`, returning a function a mounted component calls explicitly (e.g. from a link's click handler) to move to a new path without a full page reload — it updates the browser's history (so back/forward work) and the shell re-resolves and re-mounts for the new path. This stage does not automatically intercept ordinary `<a>` clicks (that requires deciding same-origin/modifier-key/target edge cases, deferred); a component that wants a real `<a>` to navigate client-side calls `usePortalNavigate()` from its own click handler.
+
 ### Shared context
 
 Distinct from the Context model below (which is about which domain/entity is currently active), shared context is a small cross-SCS data-exchange mechanism: any mounted component can publish keyed values that any other mounted component — from any SCS — can read and re-render on change, so one SCS's component (e.g. a `profile` SCS publishing the user's display name and avatar) can be consumed by another SCS's component (e.g. a `contactData` SCS wanting to show that same name next to an address) without either SCS knowing about the other's routes, roles, or manifest.
