@@ -1,6 +1,8 @@
 import { describe, test, expect } from "bun:test";
 import { buildRouteIndex, checkAccess } from "../../src/rights/route-access";
 import type { ManifestEntry } from "../../src/scs/manifest-registry";
+import { createDatabase } from "../../src/db";
+import { assignRole, getUserRoles } from "../../src/rights/roles";
 
 function entry(name: string, routes: { path: string; requiredRoles: string[] }[], stale = false): ManifestEntry {
   return {
@@ -131,5 +133,23 @@ describe("checkAccess", () => {
       entry("billing", [{ path: "/shared", requiredRoles: [] }]),
     ]);
     expect(checkAccess(index, "/shared", ["orders:admin", "billing:admin"])).toEqual({ status: "not_found" });
+  });
+});
+
+describe("integration: role storage + route enforcement", () => {
+  test("roles assigned and read back via sqlite storage satisfy the route's requiredRoles check", () => {
+    const db = createDatabase(":memory:");
+    const index = buildRouteIndex([
+      entry("orders", [{ path: "/orders", requiredRoles: ["orders:admin"] }]),
+    ]);
+
+    expect(checkAccess(index, "/orders", getUserRoles(db, "user-1"))).toEqual({
+      status: "forbidden",
+      requiredRoles: ["orders:admin"],
+    });
+
+    assignRole(db, "user-1", "orders:admin");
+
+    expect(checkAccess(index, "/orders", getUserRoles(db, "user-1"))).toEqual({ status: "allowed" });
   });
 });
