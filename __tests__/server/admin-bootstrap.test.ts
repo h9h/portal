@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { createServer } from "../../src/server";
+import { createServer, parseAdminEmails } from "../../src/server";
 import { createDatabase } from "../../src/db";
 import type { OAuthProviderConfig } from "../../src/auth/providers";
 
@@ -106,5 +106,58 @@ describe("admin bootstrap on login", () => {
     } finally {
       portal.stop();
     }
+  });
+
+  test("falls through to PORTAL_ADMIN_EMAILS when adminEmails is not passed", async () => {
+    const previous = process.env.PORTAL_ADMIN_EMAILS;
+    process.env.PORTAL_ADMIN_EMAILS = "admin@example.com";
+    let portal: ReturnType<typeof createServer> | undefined;
+    try {
+      portal = createServer({
+        port: 0,
+        db: createDatabase(":memory:"),
+        providers: { fake: fakeProviderConfig },
+        accessTokenSecret: "access-secret",
+        stateSecret: "state-secret",
+      });
+      const { accessToken } = await login(portal);
+      const meResponse = await fetch(`${portal.url}me`, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const me = (await meResponse.json()) as { roles: string[] };
+      expect(me.roles).toContain("portal:admin");
+    } finally {
+      portal?.stop();
+      if (previous === undefined) delete process.env.PORTAL_ADMIN_EMAILS;
+      else process.env.PORTAL_ADMIN_EMAILS = previous;
+    }
+  });
+});
+
+describe("parseAdminEmails", () => {
+  test("undefined returns an empty array", () => {
+    expect(parseAdminEmails(undefined)).toEqual([]);
+  });
+
+  test("an empty string returns an empty array", () => {
+    expect(parseAdminEmails("")).toEqual([]);
+  });
+
+  test("a single email with no commas returns a one-element array", () => {
+    expect(parseAdminEmails("a@example.com")).toEqual(["a@example.com"]);
+  });
+
+  test("comma-separated emails are all returned", () => {
+    expect(parseAdminEmails("a@example.com,b@example.com,c@example.com")).toEqual([
+      "a@example.com",
+      "b@example.com",
+      "c@example.com",
+    ]);
+  });
+
+  test("entries with surrounding whitespace are trimmed", () => {
+    expect(parseAdminEmails(" a@example.com , b@example.com ")).toEqual(["a@example.com", "b@example.com"]);
+  });
+
+  test("empty entries from consecutive/trailing commas are filtered out", () => {
+    expect(parseAdminEmails("a@example.com,,b@example.com,")).toEqual(["a@example.com", "b@example.com"]);
   });
 });

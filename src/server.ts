@@ -39,7 +39,7 @@ function getProvider(providers: Record<string, OAuthProviderConfig>, name: strin
   return providers[name];
 }
 
-function parseAdminEmails(value: string | undefined): string[] {
+export function parseAdminEmails(value: string | undefined): string[] {
   if (!value) return [];
   return value
     .split(",")
@@ -68,6 +68,9 @@ export function createServer(opts: ServerOptions = {}) {
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
   const configuredBaseUrl = (opts.baseUrl ?? process.env.PORTAL_BASE_URL)?.replace(/\/+$/, "");
   const adminEmails = opts.adminEmails ?? parseAdminEmails(process.env.PORTAL_ADMIN_EMAILS);
+  if (adminEmails.length === 0) {
+    console.warn("No PORTAL_ADMIN_EMAILS configured; no user will be auto-granted portal:admin on login.");
+  }
   const manifestRegistry = opts.manifestRegistry;
   // internalTokenSecret is only resolved (and only reads INTERNAL_TOKEN_SECRET
   // / warns / can throw in production) when a manifestRegistry is actually
@@ -217,8 +220,9 @@ export function createServer(opts: ServerOptions = {}) {
         const targetUserId = assignRoleMatch[1];
         if (!findUserById(db, targetUserId)) return json({ error: "user not found" }, 404);
         const body = await req.json().catch(() => null);
-        const role = body && typeof body === "object" ? (body as { role?: unknown }).role : undefined;
-        if (typeof role !== "string" || !role) return json({ error: "missing role" }, 400);
+        const rawRole = body && typeof body === "object" ? (body as { role?: unknown }).role : undefined;
+        const role = typeof rawRole === "string" ? rawRole.trim() : undefined;
+        if (!role) return json({ error: "missing role" }, 400);
         assignRole(db, targetUserId, role);
         return json({ userId: targetUserId, roles: getUserRoles(db, targetUserId) });
       }
@@ -230,8 +234,9 @@ export function createServer(opts: ServerOptions = {}) {
         const targetUserId = revokeRoleMatch[1];
         if (!findUserById(db, targetUserId)) return json({ error: "user not found" }, 404);
         const body = await req.json().catch(() => null);
-        const role = body && typeof body === "object" ? (body as { role?: unknown }).role : undefined;
-        if (typeof role !== "string" || !role) return json({ error: "missing role" }, 400);
+        const rawRole = body && typeof body === "object" ? (body as { role?: unknown }).role : undefined;
+        const role = typeof rawRole === "string" ? rawRole.trim() : undefined;
+        if (!role) return json({ error: "missing role" }, 400);
         revokeRole(db, targetUserId, role);
         return json({ userId: targetUserId, roles: getUserRoles(db, targetUserId) });
       }
@@ -257,7 +262,9 @@ export function createServer(opts: ServerOptions = {}) {
 
         if (result.status === "allowed") {
           const route = index.routes.get(normalizedPath)!;
-          const scsRoles = userRoles.filter((role) => role.startsWith(`${route.scsName}:`));
+          const scsRoles = userRoles.filter(
+            (role) => role.startsWith(`${route.scsName}:`) && !role.startsWith("portal:")
+          );
           // internalTokenSecret is always resolved above when manifestRegistry is set,
           // which is the only way to reach this branch.
           const internalToken = signInternalToken(userId, scsRoles, route.baseUrl, internalTokenSecret!);

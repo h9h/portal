@@ -130,6 +130,24 @@ describe("POST /admin/users/:userId/roles", () => {
     expect(response.status).toBe(400);
   });
 
+  test("an explicit empty string role in the body returns 400", async () => {
+    const response = await fetch(`${portal.url}admin/users/${targetUserId}/roles`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "" }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  test("a non-admin request against an unknown userId still returns 403, not 404", async () => {
+    const response = await fetch(`${portal.url}admin/users/does-not-exist/roles`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${nonAdminAccessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "orders:admin" }),
+    });
+    expect(response.status).toBe(403);
+  });
+
   test("an admin can revoke their own portal:admin role (no special guard)", async () => {
     const response = await fetch(`${portal.url}admin/users/${adminUserId}/roles/revoke`, {
       method: "POST",
@@ -149,6 +167,24 @@ describe("POST /admin/users/:userId/roles/revoke", () => {
       body: JSON.stringify({ role: "orders:admin" }),
     });
     expect(response.status).toBe(401);
+  });
+
+  test("an authenticated non-admin request returns 403", async () => {
+    const response = await fetch(`${portal.url}admin/users/${targetUserId}/roles/revoke`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${nonAdminAccessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "orders:admin" }),
+    });
+    expect(response.status).toBe(403);
+  });
+
+  test("a non-admin request against an unknown userId still returns 403, not 404", async () => {
+    const response = await fetch(`${portal.url}admin/users/does-not-exist/roles/revoke`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${nonAdminAccessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "orders:admin" }),
+    });
+    expect(response.status).toBe(403);
   });
 
   test("an admin can revoke a role from another user", async () => {

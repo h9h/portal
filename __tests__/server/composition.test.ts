@@ -45,6 +45,11 @@ beforeEach(async () => {
         }
         return new Response("orders fragment", { status: 200, headers: { "Content-Type": "text/plain" } });
       }
+      if (url.pathname === "/portal-fragment") {
+        receivedAuthHeader = req.headers.get("Authorization");
+        receivedSearch = url.search;
+        return new Response("portal fragment", { status: 200, headers: { "Content-Type": "text/plain" } });
+      }
       return new Response("not found", { status: 404 });
     },
   });
@@ -119,6 +124,18 @@ describe("route composition", () => {
     expect(payload!.roles).toEqual(["orders:admin"]);
     expect(payload!.roles).not.toContain("billing:admin");
     expect(payload!.roles).not.toContain("orders-legacy:admin");
+  });
+
+  test("a portal:-prefixed role is never forwarded, even if an SCS self-declares as portal", async () => {
+    scsManifest = { name: "portal", routes: [{ path: "/portal-fragment", requiredRoles: [] }], nav: [] };
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assignRole(db, userId, "portal:admin");
+
+    await fetch(`${portal.url}portal-fragment`, { headers: { Authorization: `Bearer ${accessToken}` } });
+
+    const internalToken = receivedAuthHeader!.slice("Bearer ".length);
+    const payload = verifyInternalToken(internalToken, INTERNAL_SECRET);
+    expect(payload!.roles).not.toContain("portal:admin");
   });
 
   test("a path no manifest declares returns 404", async () => {
