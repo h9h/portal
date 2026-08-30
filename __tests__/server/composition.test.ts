@@ -11,7 +11,12 @@ const ACCESS_SECRET = "access-secret";
 const INTERNAL_SECRET = "internal-secret";
 
 let fakeScs: ReturnType<typeof Bun.serve>;
-let scsManifest: { name: string; routes: { path: string; requiredRoles: string[] }[]; nav: [] };
+let scsManifest: {
+  name: string;
+  routes: { path: string; requiredRoles: string[]; component?: string }[];
+  nav: [];
+  publishesContext?: string[];
+};
 let receivedAuthHeader: string | null;
 let receivedSearch: string = "";
 let ordersRedirectTo: string | null = null;
@@ -227,5 +232,53 @@ describe("route composition", () => {
     expect(response.status).toBe(502);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBeTruthy();
+  });
+});
+
+describe("GET /routes", () => {
+  test("an unauthenticated request returns 401", async () => {
+    const response = await fetch(`${portal.url}routes`);
+    expect(response.status).toBe(401);
+  });
+
+  test("an authenticated request returns the full table, unfiltered by the caller's roles", async () => {
+    // this user holds no roles at all, yet still sees /orders and its requiredRoles
+    const response = await fetch(`${portal.url}routes`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { routes: { path: string; scsName: string; requiredRoles: string[] }[] };
+    expect(body.routes).toEqual([{ path: "/orders", scsName: "orders", requiredRoles: ["orders:admin"] }]);
+  });
+
+  test("includes the component name when the manifest declares one", async () => {
+    scsManifest = {
+      name: "orders",
+      routes: [{ path: "/orders", requiredRoles: ["orders:admin"], component: "OrdersView" }] as any,
+      nav: [],
+    };
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const response = await fetch(`${portal.url}routes`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const body = (await response.json()) as { routes: { component?: string }[] };
+    expect(body.routes[0].component).toBe("OrdersView");
+  });
+
+  test("includes contextOwners for a manifest declaring publishesContext", async () => {
+    scsManifest = {
+      name: "orders",
+      routes: [{ path: "/orders", requiredRoles: ["orders:admin"] }],
+      nav: [],
+      publishesContext: ["orderStatus"],
+    } as any;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const response = await fetch(`${portal.url}routes`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const body = (await response.json()) as { contextOwners: Record<string, string> };
+    expect(body.contextOwners).toEqual({ orderStatus: "orders" });
   });
 });

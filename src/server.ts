@@ -10,6 +10,8 @@ import { getAuthenticatedUserId } from "./auth/middleware";
 import { buildRouteIndex, checkAccess, type RouteIndex } from "./rights/route-access";
 import { assignRole, getUserRoles, revokeRole } from "./rights/roles";
 import { buildNav } from "./rights/nav";
+import { buildContextIndex, type ContextIndex } from "./rights/context-index";
+import { buildRouteTable, buildContextOwners } from "./shell/route-table";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
 
@@ -78,6 +80,7 @@ export function createServer(opts: ServerOptions = {}) {
   // task's code didn't exist.
   let internalTokenSecret: string | undefined;
   let routeIndex: RouteIndex = { routes: new Map(), collisions: [] };
+  let contextIndex: ContextIndex = { owners: new Map(), collisions: [] };
   // Tracks the previously logged collision set (by content) so a persistent
   // misconfiguration is reported once, not on every refresh. Wrapped so a
   // logging bug here can never throw and abort the registry's onUpdate
@@ -90,6 +93,20 @@ export function createServer(opts: ServerOptions = {}) {
       if (serialized === lastLoggedCollisions) return;
       lastLoggedCollisions = serialized;
       console.error("route collisions detected (routes disabled until resolved):", index.collisions);
+    } catch {
+      // never allow a logging failure to propagate into the caller.
+    }
+  }
+  // Same shape as logCollisionsIfChanged, with its own lastLogged state so
+  // route and context collision logging don't clobber each other.
+  let lastLoggedContextCollisions = "";
+  function logContextCollisionsIfChanged(index: ContextIndex): void {
+    try {
+      if (index.collisions.length === 0) return;
+      const serialized = JSON.stringify(index.collisions);
+      if (serialized === lastLoggedContextCollisions) return;
+      lastLoggedContextCollisions = serialized;
+      console.error("shared-context key collisions detected (keys disabled until resolved):", index.collisions);
     } catch {
       // never allow a logging failure to propagate into the caller.
     }
@@ -109,10 +126,14 @@ export function createServer(opts: ServerOptions = {}) {
       "dev-internal-secret-change-me"
     );
     routeIndex = buildRouteIndex(manifestRegistry.getManifests());
+    contextIndex = buildContextIndex(manifestRegistry.getManifests());
     logCollisionsIfChanged(routeIndex);
+    logContextCollisionsIfChanged(contextIndex);
     manifestRegistry.onUpdate(() => {
       routeIndex = buildRouteIndex(manifestRegistry.getManifests());
+      contextIndex = buildContextIndex(manifestRegistry.getManifests());
       logCollisionsIfChanged(routeIndex);
+      logContextCollisionsIfChanged(contextIndex);
     });
   }
 
@@ -204,6 +225,12 @@ export function createServer(opts: ServerOptions = {}) {
         // once the refresh completes); acceptable since nav is display-only.
         const nav = manifestRegistry ? buildNav(manifestRegistry.getManifests(), userRoles) : [];
         return json({ nav });
+      }
+
+      if (url.pathname === "/routes" && req.method === "GET") {
+        const userId = getAuthenticatedUserId(req, accessTokenSecret);
+        if (!userId) return json({ error: "unauthorized" }, 401);
+        return json({ routes: buildRouteTable(routeIndex), contextOwners: buildContextOwners(contextIndex) });
       }
 
       if (url.pathname === "/admin/users" && req.method === "GET") {

@@ -4,6 +4,7 @@ export type RouteIndexEntry = {
   scsName: string;
   baseUrl: string;
   requiredRoles: string[];
+  component?: string;
 };
 
 export type RouteCollision = {
@@ -33,7 +34,12 @@ export function buildRouteIndex(entries: ManifestEntry[]): RouteIndex {
         existingClaimants.set(entry.baseUrl, scsName);
       } else {
         claimants.set(route.path, new Map([[entry.baseUrl, scsName]]));
-        routes.set(route.path, { scsName, baseUrl: entry.baseUrl, requiredRoles: [...route.requiredRoles] });
+        routes.set(route.path, {
+          scsName,
+          baseUrl: entry.baseUrl,
+          requiredRoles: [...route.requiredRoles],
+          ...(route.component ? { component: route.component } : {}),
+        });
       }
     }
   }

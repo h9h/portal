@@ -92,6 +92,42 @@ describe("buildRouteIndex", () => {
       requiredRoles: ["orders:viewer"],
     });
   });
+
+  test("propagates a route's component name into the index", () => {
+    const index = buildRouteIndex([
+      {
+        baseUrl: "http://orders.local",
+        manifest: {
+          name: "orders",
+          routes: [{ path: "/orders", requiredRoles: [], component: "OrdersView" }],
+          nav: [],
+          publishesContext: [],
+          consumesContext: [],
+        },
+        stale: false,
+        lastFetchedAt: Date.now(),
+      },
+    ]);
+    expect(index.routes.get("/orders")?.component).toBe("OrdersView");
+  });
+
+  test("omits component from the index for a data-only route", () => {
+    const index = buildRouteIndex([
+      {
+        baseUrl: "http://orders.local",
+        manifest: {
+          name: "orders",
+          routes: [{ path: "/orders/summary", requiredRoles: [] }],
+          nav: [],
+          publishesContext: [],
+          consumesContext: [],
+        },
+        stale: false,
+        lastFetchedAt: Date.now(),
+      },
+    ]);
+    expect(index.routes.get("/orders/summary")?.component).toBeUndefined();
+  });
 });
 
 describe("checkAccess", () => {
