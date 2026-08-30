@@ -1,6 +1,4 @@
-jsx = "react"
-jsxFactory = "h"
-jsxFragment = "Fragment"
+jsx = "react-jsx"
 jsxImportSource = "react"
 
 logLevel = "debug" # "debug" | "warn" | "error"
