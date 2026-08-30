@@ -12,17 +12,19 @@ describe("parseManifest", () => {
       name: "orders",
       routes: [{ path: "/orders", requiredRoles: ["orders:viewer"] }],
       nav: [{ label: "Orders", path: "/orders", requiredRoles: ["orders:viewer"] }],
+      publishesContext: [],
+      consumesContext: [],
     });
   });
 
   test("allows empty routes and nav arrays", () => {
     const manifest = parseManifest({ name: "orders", routes: [], nav: [] });
-    expect(manifest).toEqual({ name: "orders", routes: [], nav: [] });
+    expect(manifest).toEqual({ name: "orders", routes: [], nav: [], publishesContext: [], consumesContext: [] });
   });
 
   test("ignores unknown top-level fields", () => {
     const manifest = parseManifest({ name: "orders", routes: [], nav: [], extra: "ignored" });
-    expect(manifest).toEqual({ name: "orders", routes: [], nav: [] });
+    expect(manifest).toEqual({ name: "orders", routes: [], nav: [], publishesContext: [], consumesContext: [] });
   });
 
   test("rejects a missing name", () => {
@@ -62,5 +64,80 @@ describe("parseManifest", () => {
     expect(parseManifest(null)).toBeNull();
     expect(parseManifest(undefined)).toBeNull();
     expect(parseManifest(42)).toBeNull();
+  });
+});
+
+describe("bundle field", () => {
+  test("accepts a manifest with a bundle path", () => {
+    const manifest = parseManifest({ name: "orders", bundle: "/.portal/bundle.js", routes: [], nav: [] });
+    expect(manifest?.bundle).toBe("/.portal/bundle.js");
+  });
+
+  test("omits bundle when absent", () => {
+    const manifest = parseManifest({ name: "orders", routes: [], nav: [] });
+    expect(manifest?.bundle).toBeUndefined();
+  });
+
+  test("rejects a non-string bundle", () => {
+    expect(parseManifest({ name: "orders", bundle: 42, routes: [], nav: [] })).toBeNull();
+  });
+
+  test("rejects an empty-string bundle", () => {
+    expect(parseManifest({ name: "orders", bundle: "", routes: [], nav: [] })).toBeNull();
+  });
+});
+
+describe("route component field", () => {
+  test("accepts a route with a component name", () => {
+    const manifest = parseManifest({
+      name: "orders",
+      routes: [{ path: "/orders", requiredRoles: [], component: "OrdersView" }],
+      nav: [],
+    });
+    expect(manifest?.routes[0]).toEqual({ path: "/orders", requiredRoles: [], component: "OrdersView" });
+  });
+
+  test("omits component when absent (data-only route)", () => {
+    const manifest = parseManifest({
+      name: "orders",
+      routes: [{ path: "/orders/summary", requiredRoles: [] }],
+      nav: [],
+    });
+    expect(manifest?.routes[0]).toEqual({ path: "/orders/summary", requiredRoles: [] });
+    expect(manifest?.routes[0].component).toBeUndefined();
+  });
+
+  test("rejects a non-string component", () => {
+    expect(
+      parseManifest({ name: "orders", routes: [{ path: "/orders", requiredRoles: [], component: 42 }], nav: [] })
+    ).toBeNull();
+  });
+});
+
+describe("publishesContext / consumesContext fields", () => {
+  test("accepts declared publish and consume keys", () => {
+    const manifest = parseManifest({
+      name: "profile",
+      routes: [],
+      nav: [],
+      publishesContext: ["profile"],
+      consumesContext: ["contactData"],
+    });
+    expect(manifest?.publishesContext).toEqual(["profile"]);
+    expect(manifest?.consumesContext).toEqual(["contactData"]);
+  });
+
+  test("defaults both to an empty array when absent", () => {
+    const manifest = parseManifest({ name: "orders", routes: [], nav: [] });
+    expect(manifest?.publishesContext).toEqual([]);
+    expect(manifest?.consumesContext).toEqual([]);
+  });
+
+  test("rejects a non-string-array publishesContext", () => {
+    expect(parseManifest({ name: "orders", routes: [], nav: [], publishesContext: [1, 2] })).toBeNull();
+  });
+
+  test("rejects a non-string-array consumesContext", () => {
+    expect(parseManifest({ name: "orders", routes: [], nav: [], consumesContext: "not-an-array" })).toBeNull();
   });
 });

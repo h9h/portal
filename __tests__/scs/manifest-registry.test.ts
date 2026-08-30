@@ -5,6 +5,8 @@ const validManifestJson = {
   name: "orders",
   routes: [{ path: "/orders", requiredRoles: ["orders:viewer"] }],
   nav: [{ label: "Orders", path: "/orders", requiredRoles: ["orders:viewer"] }],
+  publishesContext: [] as string[],
+  consumesContext: [] as string[],
 };
 
 let servers: ReturnType<typeof Bun.serve>[] = [];

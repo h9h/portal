@@ -7,7 +7,7 @@ import { assignRole, getUserRoles } from "../../src/rights/roles";
 function entry(name: string, routes: { path: string; requiredRoles: string[] }[], stale = false): ManifestEntry {
   return {
     baseUrl: `http://${name}.local`,
-    manifest: { name, routes, nav: [] },
+    manifest: { name, routes, nav: [], publishesContext: [], consumesContext: [] },
     stale,
     lastFetchedAt: stale ? null : Date.now(),
   };

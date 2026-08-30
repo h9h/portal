@@ -9,7 +9,7 @@ function entry(
 ): ManifestEntry {
   return {
     baseUrl: `http://${name}.local`,
-    manifest: { name, routes: [], nav },
+    manifest: { name, routes: [], nav, publishesContext: [], consumesContext: [] },
     stale,
     lastFetchedAt: stale ? null : Date.now(),
   };
