@@ -5,6 +5,7 @@ import type { OAuthProviderConfig } from "../../src/auth/providers";
 
 let fakeProvider: ReturnType<typeof Bun.serve>;
 let portal: ReturnType<typeof createServer>;
+let fakeProviderConfig: OAuthProviderConfig;
 
 beforeAll(() => {
   fakeProvider = Bun.serve({
@@ -25,7 +26,7 @@ beforeAll(() => {
     },
   });
 
-  const providerConfig: OAuthProviderConfig = {
+  fakeProviderConfig = {
     name: "fake",
     authorizeUrl: `${fakeProvider.url}authorize`,
     tokenUrl: `${fakeProvider.url}token`,
@@ -43,7 +44,7 @@ beforeAll(() => {
   portal = createServer({
     port: 0,
     db: createDatabase(":memory:"),
-    providers: { fake: providerConfig },
+    providers: { fake: fakeProviderConfig },
     accessTokenSecret: "access-secret",
     stateSecret: "state-secret",
   });
@@ -179,6 +180,42 @@ describe("full login flow", () => {
   test("login with a prototype-pollution-style provider name returns 404, not a crash", async () => {
     const response = await fetch(`${portal.url}auth/login/constructor`, { redirect: "manual" });
     expect(response.status).toBe(404);
+  });
+
+  test("a configured baseUrl overrides the request-derived redirect_uri", async () => {
+    const withBaseUrl = createServer({
+      port: 0,
+      db: createDatabase(":memory:"),
+      providers: { fake: fakeProviderConfig },
+      accessTokenSecret: "access-secret",
+      stateSecret: "state-secret",
+      baseUrl: "https://portal.example",
+    });
+    try {
+      const response = await fetch(`${withBaseUrl.url}auth/login/fake`, { redirect: "manual" });
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.searchParams.get("redirect_uri")).toBe("https://portal.example/auth/callback/fake");
+    } finally {
+      withBaseUrl.stop();
+    }
+  });
+
+  test("a trailing slash on the configured baseUrl is normalized away", async () => {
+    const withTrailingSlash = createServer({
+      port: 0,
+      db: createDatabase(":memory:"),
+      providers: { fake: fakeProviderConfig },
+      accessTokenSecret: "access-secret",
+      stateSecret: "state-secret",
+      baseUrl: "https://portal.example/",
+    });
+    try {
+      const response = await fetch(`${withTrailingSlash.url}auth/login/fake`, { redirect: "manual" });
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.searchParams.get("redirect_uri")).toBe("https://portal.example/auth/callback/fake");
+    } finally {
+      withTrailingSlash.stop();
+    }
   });
 
   test("callback with a bad code returns a clean error, not a crash", async () => {

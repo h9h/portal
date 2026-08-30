@@ -32,6 +32,7 @@ Portal has no built-in knowledge of any SCS's routes, nav entries, or roles beyo
 ### Identity, sessions, and rights
 
 - **Login**: user explicitly picks a provider (e.g. "Sign in with GitHub") from Portal's configured list of OAuth2 authorization servers. Portal acts as the OAuth2 client; it never sees or stores the provider's password.
+- **Redirect URI**: the OAuth `redirect_uri` sent to the provider defaults to the incoming request's own origin, which is only correct for local/plain-HTTP development. In any deployment behind TLS or a reverse proxy, Portal's base URL must be configured explicitly (`PORTAL_BASE_URL`, or the `baseUrl` server option) so the registered callback matches what's actually sent — otherwise the provider will reject the exchange with a redirect URI mismatch.
 - **First login**: Portal provisions a local profile linked to the provider identity, with no roles assigned by default.
 - **Browser ↔ Portal**: after login, Portal issues its own bearer token (not the provider's token). The frontend stores it and sends it as `Authorization: Bearer …` on requests to Portal. Logout discards/invalidates this token; it is short-lived and reissued via a refresh flow rather than long-lived.
 - **Portal → SCS**: for each request that needs an SCS fragment, Portal mints a short-lived signed internal token (JWT) carrying the user id and the user's roles for that SCS. The SCS verifies the signature; it does not need to know how the user originally authenticated.

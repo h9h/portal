@@ -50,7 +50,7 @@ export function createServer(opts: ServerOptions = {}) {
   const providers = opts.providers ?? getProviders();
   const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
-  const configuredBaseUrl = opts.baseUrl ?? process.env.PORTAL_BASE_URL;
+  const configuredBaseUrl = (opts.baseUrl ?? process.env.PORTAL_BASE_URL)?.replace(/\/+$/, "");
 
   return Bun.serve({
     port: opts.port ?? 3000,
