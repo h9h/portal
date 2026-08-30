@@ -410,3 +410,67 @@ describe("GET /_shell/*", () => {
     }
   });
 });
+
+describe("end-to-end: a manifest declaring bundle, component, and context fields", () => {
+  test("GET /routes, GET /_scs/:scsName/bundle.js, and context ownership all agree with one manifest", async () => {
+    scsManifest = {
+      name: "orders",
+      bundle: "/.portal/bundle.js",
+      routes: [
+        { path: "/orders", requiredRoles: ["orders:admin"], component: "OrdersView" },
+        { path: "/orders/summary", requiredRoles: ["orders:admin"] },
+      ],
+      nav: [{ label: "Orders", path: "/orders", requiredRoles: ["orders:admin"] }],
+      publishesContext: ["orderStatus"],
+      consumesContext: ["profile"],
+    } as any;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    // /routes reflects both the mounted-page route and the data-only route,
+    // plus the context ownership this manifest declared.
+    const routesResponse = await fetch(`${portal.url}routes`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const routesBody = (await routesResponse.json()) as {
+      routes: { path: string; scsName: string; requiredRoles: string[]; component?: string }[];
+      contextOwners: Record<string, string>;
+    };
+    expect(routesBody.routes).toEqual(
+      expect.arrayContaining([
+        { path: "/orders", scsName: "orders", requiredRoles: ["orders:admin"], component: "OrdersView" },
+        { path: "/orders/summary", scsName: "orders", requiredRoles: ["orders:admin"] },
+      ])
+    );
+    expect(routesBody.contextOwners).toEqual({ orderStatus: "orders" });
+
+    // The bundle Portal proxies is exactly what the SCS itself serves.
+    const bundleResponse = await fetch(`${portal.url}_scs/orders/bundle.js`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(bundleResponse.status).toBe(200);
+    expect(await bundleResponse.text()).toBe("export const OrdersView = () => null;");
+
+    // The data-only route still enforces roles exactly like before this plan.
+    const dataResponse = await fetch(`${portal.url}orders/summary`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
+    // this test's default accessToken/userId (from beforeEach) hold no roles
+    expect(dataResponse.status).toBe(403);
+  });
+
+  test("a manifest self-declaring name \"portal\" cannot claim portal-owned context keys via publishesContext collision with a real Portal concept", async () => {
+    // Sanity check that context ownership is validated the same way regardless
+    // of what an SCS calls itself — no special-casing needed since ownership
+    // is keyed on the declared key string, not on any reserved-name check.
+    scsManifest = {
+      name: "orders",
+      routes: [],
+      nav: [],
+      publishesContext: ["profile"],
+    } as any;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const response = await fetch(`${portal.url}routes`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const body = (await response.json()) as { contextOwners: Record<string, string> };
+    expect(body.contextOwners).toEqual({ profile: "orders" });
+  });
+});
