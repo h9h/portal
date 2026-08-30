@@ -43,3 +43,17 @@ export function buildRouteIndex(entries: ManifestEntry[]): RouteIndex {
 
   return { routes, collisions };
 }
+
+export type AccessResult =
+  | { status: "allowed" }
+  | { status: "not_found" }
+  | { status: "forbidden"; requiredRoles: string[] };
+
+export function checkAccess(index: RouteIndex, path: string, userRoles: string[]): AccessResult {
+  const route = index.routes.get(path);
+  if (!route) return { status: "not_found" };
+  if (route.requiredRoles.length === 0) return { status: "allowed" };
+  const hasRequiredRole = route.requiredRoles.some((role) => userRoles.includes(role));
+  if (hasRequiredRole) return { status: "allowed" };
+  return { status: "forbidden", requiredRoles: route.requiredRoles };
+}

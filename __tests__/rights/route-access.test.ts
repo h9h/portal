@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { buildRouteIndex } from "../../src/rights/route-access";
+import { buildRouteIndex, checkAccess } from "../../src/rights/route-access";
 import type { ManifestEntry } from "../../src/scs/manifest-registry";
 
 function entry(name: string, routes: { path: string; requiredRoles: string[] }[], stale = false): ManifestEntry {
@@ -77,5 +77,59 @@ describe("buildRouteIndex", () => {
     ]);
     expect(index.collisions).toEqual([]);
     expect(index.routes.get("/orders")).toEqual({ scsName: "orders", requiredRoles: ["orders:viewer"] });
+  });
+});
+
+describe("checkAccess", () => {
+  test("allows a request to a public route (empty requiredRoles) regardless of user roles", () => {
+    const index = buildRouteIndex([entry("orders", [{ path: "/orders", requiredRoles: [] }])]);
+    expect(checkAccess(index, "/orders", [])).toEqual({ status: "allowed" });
+  });
+
+  test("allows a request when the user holds the required role", () => {
+    const index = buildRouteIndex([
+      entry("orders", [{ path: "/orders", requiredRoles: ["orders:viewer"] }]),
+    ]);
+    expect(checkAccess(index, "/orders", ["orders:viewer"])).toEqual({ status: "allowed" });
+  });
+
+  test("allows a request when the user holds at least one of several required roles", () => {
+    const index = buildRouteIndex([
+      entry("orders", [{ path: "/orders", requiredRoles: ["orders:viewer", "orders:admin"] }]),
+    ]);
+    expect(checkAccess(index, "/orders", ["orders:admin"])).toEqual({ status: "allowed" });
+  });
+
+  test("forbids a request when the user holds none of the required roles", () => {
+    const index = buildRouteIndex([
+      entry("orders", [{ path: "/orders", requiredRoles: ["orders:admin"] }]),
+    ]);
+    expect(checkAccess(index, "/orders", ["billing:viewer"])).toEqual({
+      status: "forbidden",
+      requiredRoles: ["orders:admin"],
+    });
+  });
+
+  test("forbids a request when the user has no roles at all", () => {
+    const index = buildRouteIndex([
+      entry("orders", [{ path: "/orders", requiredRoles: ["orders:admin"] }]),
+    ]);
+    expect(checkAccess(index, "/orders", [])).toEqual({
+      status: "forbidden",
+      requiredRoles: ["orders:admin"],
+    });
+  });
+
+  test("reports not_found for a path no manifest declares", () => {
+    const index = buildRouteIndex([entry("orders", [{ path: "/orders", requiredRoles: [] }])]);
+    expect(checkAccess(index, "/unknown", ["orders:admin"])).toEqual({ status: "not_found" });
+  });
+
+  test("reports not_found for a path excluded due to a cross-SCS collision", () => {
+    const index = buildRouteIndex([
+      entry("orders", [{ path: "/shared", requiredRoles: [] }]),
+      entry("billing", [{ path: "/shared", requiredRoles: [] }]),
+    ]);
+    expect(checkAccess(index, "/shared", ["orders:admin", "billing:admin"])).toEqual({ status: "not_found" });
   });
 });
