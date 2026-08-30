@@ -172,6 +172,10 @@ export function createServer(opts: ServerOptions = {}) {
         return json({ status: "ok" });
       }
 
+      if (url.pathname === "/auth/providers" && req.method === "GET") {
+        return json(Object.values(providers).map((provider) => ({ name: provider.name, label: provider.label })));
+      }
+
       const loginMatch = url.pathname.match(/^\/auth\/login\/([^/]+)$/);
       if (loginMatch && req.method === "GET") {
         const provider = getProvider(providers, loginMatch[1]);

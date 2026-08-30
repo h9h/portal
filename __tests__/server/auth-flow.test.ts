@@ -28,6 +28,7 @@ beforeAll(() => {
 
   fakeProviderConfig = {
     name: "fake",
+    label: "Fake Provider",
     authorizeUrl: `${fakeProvider.url}authorize`,
     tokenUrl: `${fakeProvider.url}token`,
     userInfoUrl: `${fakeProvider.url}user`,
@@ -232,5 +233,22 @@ describe("full login flow", () => {
     expect(callbackResponse.headers.get("Content-Type")).toBe("application/json");
     const body = (await callbackResponse.json()) as { error: string };
     expect(body.error).toBeTruthy();
+  });
+});
+
+describe("GET /auth/providers", () => {
+  test("lists configured providers by name and label, with no secrets", async () => {
+    const response = await fetch(`${portal.url}auth/providers`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as unknown[];
+    expect(body).toEqual([{ name: "fake", label: "Fake Provider" }]);
+  });
+
+  test("requires no authentication", async () => {
+    // (same request as above, no Authorization header — already implicit,
+    // this test exists to make the "no auth required" contract explicit
+    // and catch a future accidental auth-gate regression)
+    const response = await fetch(`${portal.url}auth/providers`);
+    expect(response.status).not.toBe(401);
   });
 });

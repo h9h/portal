@@ -2,6 +2,7 @@ import type { ProviderProfile } from "./users";
 
 export type OAuthProviderConfig = {
   name: string;
+  label: string;
   authorizeUrl: string;
   tokenUrl: string;
   userInfoUrl: string;
@@ -15,6 +16,7 @@ export function getProviders(env: NodeJS.ProcessEnv = process.env): Record<strin
   return {
     github: {
       name: "github",
+      label: "GitHub",
       authorizeUrl: "https://github.com/login/oauth/authorize",
       tokenUrl: "https://github.com/login/oauth/access_token",
       userInfoUrl: "https://api.github.com/user",

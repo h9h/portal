@@ -23,6 +23,7 @@ beforeAll(() => {
 
   fakeProviderConfig = {
     name: "fake",
+    label: "Fake Provider",
     authorizeUrl: `${fakeProvider.url}authorize`,
     tokenUrl: `${fakeProvider.url}token`,
     userInfoUrl: `${fakeProvider.url}user`,

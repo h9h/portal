@@ -25,3 +25,11 @@ describe("github mapProfile", () => {
     expect(typeof profile.providerUserId).toBe("string");
   });
 });
+
+describe("getProviders labels", () => {
+  test("github has a display label distinct from its provider key", () => {
+    const { name, label } = getProviders({}).github;
+    expect(name).toBe("github");
+    expect(label).toBe("GitHub");
+  });
+});

@@ -4,6 +4,7 @@ import type { OAuthProviderConfig } from "../../src/auth/providers";
 
 const provider: OAuthProviderConfig = {
   name: "test-provider",
+  label: "Test Provider",
   authorizeUrl: "https://provider.example/authorize",
   tokenUrl: "https://provider.example/token",
   userInfoUrl: "https://provider.example/user",
