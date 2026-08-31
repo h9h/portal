@@ -2,6 +2,7 @@ import { Component, useEffect, useState, type ReactNode } from "react";
 import { PortalRuntimeProvider, portalFetch, useCurrentPath } from "@portal/runtime";
 import { storeTokens } from "../runtime/auth";
 import { resolveRoute, type RouteTableEntry } from "./router";
+import { PortalFrame, type Me, type Provider, type NavItem } from "./portal-frame";
 
 export type ComponentLoader = (bundleUrl: string) => Promise<Record<string, unknown>>;
 
@@ -28,9 +29,7 @@ export const defaultLoader: ComponentLoader = async (bundleUrl) => {
   }
 };
 
-type Me = { id: string; roles: string[] } | null;
 type RoutesResponse = { routes: RouteTableEntry[]; contextOwners: Record<string, string> };
-type Provider = { name: string; label: string };
 type Status = "loading" | "login" | "forbidden" | "not_found" | "error" | "ready";
 
 class MountErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -52,6 +51,7 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
   const [status, setStatus] = useState<Status>("loading");
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [navItems, setNavItems] = useState<NavItem[]>([]);
 
   // Boot once: identity + the full route table. Any rejection here (network
   // failure, unparseable JSON) must still resolve to a terminal status —
@@ -92,6 +92,23 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
       } catch (err) {
         console.error("shell boot failed", err);
         setStatus("error");
+      }
+    })();
+  }, []);
+
+  // Independent of the /me boot sequence above and never fatal: /nav is
+  // display-only (see specification.md, Context model), and now allows
+  // anonymous callers, so this can run regardless of auth state. A failure
+  // here must never affect `status` — it just leaves the nav space empty.
+  useEffect(() => {
+    (async () => {
+      try {
+        const navResponse = await portalFetch("/nav");
+        if (!navResponse.ok) return;
+        const navJson = (await navResponse.json()) as { nav: NavItem[] };
+        setNavItems(navJson.nav);
+      } catch (err) {
+        console.error("nav fetch failed", err);
       }
     })();
   }, []);
@@ -138,29 +155,37 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
     };
   }, [me, routesData, path, loadComponent]);
 
-  if (status === "loading") return <div>Loading…</div>;
-  if (status === "login") {
+  function renderContent(): ReactNode {
+    if (status === "loading") return <div>Loading…</div>;
+    if (status === "login") {
+      return (
+        <div>
+          {loginError && <p>{loginError}</p>}
+          {providers.map((provider) => (
+            <a key={provider.name} href={`/auth/login/${provider.name}`}>
+              Sign in with {provider.label}
+            </a>
+          ))}
+        </div>
+      );
+    }
+    if (status === "forbidden") return <div>You don't have access to this page.</div>;
+    if (status === "not_found") return <div>Not found.</div>;
+    if (status === "error") return <div>Something went wrong loading this page.</div>;
+
+    const { Component: Mounted, scsName } = mounted!;
     return (
-      <div>
-        {loginError && <p>{loginError}</p>}
-        {providers.map((provider) => (
-          <a key={provider.name} href={`/auth/login/${provider.name}`}>
-            Sign in with {provider.label}
-          </a>
-        ))}
-      </div>
+      <MountErrorBoundary>
+        <PortalRuntimeProvider scsName={scsName} contextOwners={routesData!.contextOwners}>
+          <Mounted />
+        </PortalRuntimeProvider>
+      </MountErrorBoundary>
     );
   }
-  if (status === "forbidden") return <div>You don't have access to this page.</div>;
-  if (status === "not_found") return <div>Not found.</div>;
-  if (status === "error") return <div>Something went wrong loading this page.</div>;
 
-  const { Component: Mounted, scsName } = mounted!;
   return (
-    <MountErrorBoundary>
-      <PortalRuntimeProvider scsName={scsName} contextOwners={routesData!.contextOwners}>
-        <Mounted />
-      </PortalRuntimeProvider>
-    </MountErrorBoundary>
+    <PortalFrame me={me} providers={providers} navItems={navItems}>
+      {renderContent()}
+    </PortalFrame>
   );
 }

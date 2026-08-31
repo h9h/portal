@@ -64,7 +64,7 @@ describe("shell App", () => {
       await flush(act);
 
       expect(container.textContent).toContain("GitHub");
-      const link = container.querySelector("a") as HTMLAnchorElement | null;
+      const link = container.querySelector('a[href="/auth/login/github"]') as HTMLAnchorElement | null;
       expect(link?.getAttribute("href")).toBe("/auth/login/github");
     } finally {
       await act(async () => {
@@ -396,6 +396,72 @@ describe("shell App", () => {
       await flush(act);
 
       expect(container.textContent).toContain("Not found");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+    }
+  });
+
+  test("the persistent frame shows nav items and profile/logout controls once authenticated, even on a not-found route", async () => {
+    setInitialPath("/");
+    const restore = mockFetchSequence([
+      { path: "/me", status: 200, body: { id: "u1", roles: [], displayName: "Ada Lovelace", email: "ada@example.com" } },
+      { path: "/routes", status: 200, body: { routes: [], contextOwners: {} } },
+      { path: "/nav", status: 200, body: { nav: [{ label: "Orders", path: "/orders", domain: "orders" }] } },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+      await flush(act);
+
+      expect(container.querySelector("header")).not.toBeNull();
+      expect(container.querySelector("footer")).not.toBeNull();
+      expect(container.textContent).toContain("Orders");
+      expect(container.textContent).toContain("Ada Lovelace");
+      expect(container.textContent).toContain("Logout");
+      expect(container.textContent).toContain("Not found"); // main content is still the existing not-found state
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+    }
+  });
+
+  test("the persistent frame's own sign-in links render alongside the login screen's, when anonymous", async () => {
+    const restore = mockFetchSequence([
+      { path: "/me", status: 401, body: { error: "unauthorized" } },
+      { path: "/auth/providers", status: 200, body: [{ name: "github", label: "GitHub" }] },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+      await flush(act);
+
+      expect(container.querySelector("header")).not.toBeNull();
+      expect(container.querySelector("footer")).not.toBeNull();
+      // One link from the frame's persistent header, one from the login
+      // screen's own content — both render "Sign in with GitHub" for an
+      // anonymous session (see Task 3 of the portal-frame plan).
+      expect(container.querySelectorAll('a[href="/auth/login/github"]').length).toBe(2);
     } finally {
       await act(async () => {
         root.unmount();
