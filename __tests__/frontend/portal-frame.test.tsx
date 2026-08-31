@@ -46,6 +46,19 @@ describe("PortalFrame", () => {
     }
   });
 
+  test("the header's border and padding reference the shared theme's tokens, each with the same literal fallback it had before", async () => {
+    // Not a DOM-rendering test — see the note above Step 1 in this task's
+    // brief for why: happy-dom's CSSStyleDeclaration silently drops any
+    // style value containing var(...), so this checks the component's own
+    // source text instead.
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(new URL("../../src/frontend/portal-frame.tsx", import.meta.url), "utf8");
+    expect(source).toContain("var(--portal-color-border, #ddd)");
+    expect(source).toContain("var(--portal-space-3, 0.75rem)");
+    expect(source).toContain("var(--portal-space-6, 1.5rem)");
+    expect(source).toContain("var(--portal-color-primary, #4338ca)");
+  });
+
   test("a modifier-key click on an internal link does not trigger client-side navigation", async () => {
     setInitialPath("/somewhere");
     const { createRoot } = await import("react-dom/client");

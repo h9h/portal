@@ -20,20 +20,37 @@ export type PortalFrameProps = {
 };
 
 const styles = {
-  page: { display: "flex", flexDirection: "column", minHeight: "100vh" },
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: "100vh",
+    fontFamily: "var(--portal-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif)",
+    color: "var(--portal-color-text, #1a1a1a)",
+  },
   header: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: "1rem",
-    padding: "0.75rem 1.5rem",
-    borderBottom: "1px solid #ddd",
+    gap: "var(--portal-space-4, 1rem)",
+    padding: "var(--portal-space-3, 0.75rem) var(--portal-space-6, 1.5rem)",
+    borderBottom: "var(--portal-border-width, 1px) solid var(--portal-color-border, #ddd)",
   },
-  logo: { display: "flex", alignItems: "center", gap: "0.5rem", textDecoration: "none", color: "inherit" },
-  nav: { display: "flex", gap: "1rem", flexWrap: "wrap" },
-  authControls: { display: "flex", alignItems: "center", gap: "0.75rem" },
-  main: { flex: 1, padding: "1.5rem" },
-  footer: { padding: "1rem 1.5rem", borderTop: "1px solid #ddd", fontSize: "0.85rem", color: "#666" },
+  logo: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--portal-space-2, 0.5rem)",
+    textDecoration: "none",
+    color: "inherit",
+  },
+  nav: { display: "flex", gap: "var(--portal-space-4, 1rem)", flexWrap: "wrap" },
+  authControls: { display: "flex", alignItems: "center", gap: "var(--portal-space-3, 0.75rem)" },
+  main: { flex: 1, padding: "var(--portal-space-6, 1.5rem)" },
+  footer: {
+    padding: "var(--portal-space-4, 1rem) var(--portal-space-6, 1.5rem)",
+    borderTop: "var(--portal-border-width, 1px) solid var(--portal-color-border, #ddd)",
+    fontSize: "var(--portal-font-size-small, 0.85rem)",
+    color: "var(--portal-color-text-muted, #666)",
+  },
 } satisfies Record<string, CSSProperties>;
 
 // Preserves normal <a> semantics (open in new tab, copy link, modifier-key
@@ -79,8 +96,15 @@ function InternalLink({
 function PortalLogoPlaceholder() {
   return (
     <svg width="28" height="28" viewBox="0 0 28 28" role="img" aria-label="Portal logo placeholder">
-      <rect width="28" height="28" rx="6" fill="#4338ca" />
-      <text x="14" y="19" textAnchor="middle" fontSize="14" fontFamily="sans-serif" fill="#fff">
+      <rect width="28" height="28" rx="6" fill="var(--portal-color-primary, #4338ca)" />
+      <text
+        x="14"
+        y="19"
+        textAnchor="middle"
+        fontSize="14"
+        fontFamily="sans-serif"
+        fill="var(--portal-color-primary-contrast, #fff)"
+      >
         P
       </text>
     </svg>
