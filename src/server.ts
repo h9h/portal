@@ -66,9 +66,29 @@ function resolveSecret(explicit: string | undefined, envVar: string, devDefault:
   return devDefault;
 }
 
+// Unlike resolveSecret, there is no safe dev default for OAuth client
+// credentials — a fabricated client_id can't produce a working login, it
+// would just replace one broken value with another. So this only warns
+// (in every environment) rather than throwing in production; the actual
+// failure is caught per-request in the /auth/login/:provider handler,
+// which redirects to the shell's error screen instead of forwarding a
+// request with an empty client_id on to the provider.
+function warnOnMissingProviderCredentials(providers: Record<string, OAuthProviderConfig>): void {
+  for (const provider of Object.values(providers)) {
+    if (provider.clientId && provider.clientSecret) continue;
+    const envPrefix = provider.name.toUpperCase();
+    console.warn(
+      `OAuth provider "${provider.name}" has no client credentials configured ` +
+        `(set ${envPrefix}_CLIENT_ID / ${envPrefix}_CLIENT_SECRET after registering a ${provider.label} OAuth App). ` +
+        `Sign-in with ${provider.label} will fail until this is fixed.`
+    );
+  }
+}
+
 export function createServer(opts: ServerOptions = {}) {
   const db = opts.db ?? createDatabase(process.env.DATABASE_PATH ?? "portal.sqlite");
   const providers = opts.providers ?? getProviders();
+  warnOnMissingProviderCredentials(providers);
   const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
   const stateCookieSecure = process.env.NODE_ENV === "production";
@@ -187,6 +207,14 @@ export function createServer(opts: ServerOptions = {}) {
       if (loginMatch && req.method === "GET") {
         const provider = getProvider(providers, loginMatch[1]);
         if (!provider) return json({ error: "unknown provider" }, 404);
+        // Without real credentials, forwarding the request to the provider
+        // would send an empty client_id and get a confusing error back from
+        // the provider's own site. Fail inside Portal instead, where the
+        // shell's existing error screen can show something meaningful.
+        if (!provider.clientId || !provider.clientSecret) {
+          const shellOrigin = configuredBaseUrl ?? url.origin;
+          return Response.redirect(`${shellOrigin}/#error=oauth_failed`, 302);
+        }
         const state = createState(stateSecret);
         const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${loginMatch[1]}`;
         return new Response(null, {
