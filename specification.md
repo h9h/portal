@@ -79,11 +79,64 @@ Portal serves a single client shell: a small React application, bootstrapped onc
 
 - *Logo* (left): links to `/` via `usePortalNavigate()`. Currently a placeholder image (an inline SVG mark) — swapping in a real logo image is a later, cosmetic change with no structural impact.
 - *Nav* (center): one link per entry from `/nav` (see Context model above), fetched once identity has resolved (right after, not literally alongside, `/me` — so it rides on `/me`'s own token refresh instead of possibly racing it with a stale token), independent of authentication state — this is why `/nav` was changed to allow anonymous callers rather than 401. A failed or unmocked `/nav` fetch is non-fatal: caught locally, nav simply renders empty, and this never affects the shell's own `loading`/`error`/etc. status, since nav is display-only the same way it already was server-side.
-- *Auth controls* (right), state-dependent: while identity is still resolving, empty; once resolved anonymous, one `Sign in with {label}` link per configured provider — duplicating the login screen's own links, since an anonymous session's status is always `login` (the resolve/mount effect never runs while `me` is `null`, so this is the only status an anonymous visitor ever sees); once resolved to a signed-in user, a link to `/profile` (via `usePortalNavigate()`, showing `displayName ?? email ?? id`) and a **Logout** button wired to the existing `usePortalLogout()`. `/profile` is not a route any SCS has registered yet, so visiting it currently resolves to the shell's own "Not found." state — expected until a future SCS claims it, not a gap in the frame itself.
+- *Auth controls* (right), state-dependent: while identity is still resolving, empty; once resolved anonymous, one `Sign in with {label}` link per configured provider — duplicating the login screen's own links, since an anonymous session's status is always `login` (the resolve/mount effect never runs while `me` is `null`, so this is the only status an anonymous visitor ever sees); once resolved to a signed-in user, a link to `/profile` (via `usePortalNavigate()`, showing `displayName ?? email ?? id`) and a **Logout** button wired to the existing `usePortalLogout()`. `/profile` is served by the `scs-profile` reference SCS (see `docs/scs-contributor-guide.md`) when it's registered via `PORTAL_SCS_URLS`; without it registered, the link still resolves to the shell's own "Not found." state, same as any unregistered path.
 
 The footer holds static placeholder content (e.g. a contact line) with no data source of its own — edited directly in the component, not fetched or configured.
 
-No CSS framework or build-step change was introduced for this: the frame's layout (sticky footer via a flex column with `flex: 1` on `<main>`) is plain inline React style objects, consistent with the rest of the shell having no CSS at all yet.
+The frame's own layout (sticky footer via a flex column with `flex: 1` on `<main>`) is plain inline React style objects; its colors, spacing, and typography are drawn from the shared theme described next.
+
+**Shared theme**: Portal serves `GET /_shell/theme.css` — a small, hand-written stylesheet (no build step, no CSS framework), public with no authentication check, the same reasoning as the other `/_shell/*` assets (needed before login just to render a login screen consistently). The shell's bootstrap HTML links it once (`<link rel="stylesheet" href="/_shell/theme.css">`); because CSS custom properties inherit through the whole document, every mounted SCS component gets them automatically, with no import, no build-time dependency, and no coupling to `@portal/runtime` at all — a component just references a variable in its own inline styles or a `<style>` tag it renders itself. This is deliberately lighter-weight than sharing a component library the way `react`/`@portal/runtime` are shared: it costs an SCS nothing to opt in, and nothing to ignore.
+
+An SCS should reference a token with a literal fallback — `var(--portal-color-primary, #4338ca)`, not a bare `var(--portal-color-primary)` — so its component still renders sensibly if `theme.css` ever fails to load, or when the component is rendered in isolation (e.g. under test) outside Portal's own shell.
+
+This is a real contract, not just a convenience: adding a new token or utility class is backward compatible, but renaming or removing one that an SCS already depends on is a breaking change, the same stability expectation the manifest schema and internal-token format already carry elsewhere in this document.
+
+Current tokens (`:root`, all prefixed `--portal-` to avoid collision with anything an SCS's own stylesheet might declare):
+
+```css
+:root {
+  --portal-color-primary: #4338ca;
+  --portal-color-primary-contrast: #ffffff;
+  --portal-color-text: #1a1a1a;
+  --portal-color-text-muted: #666666;
+  --portal-color-border: #dddddd;
+  --portal-color-surface: #ffffff;
+  --portal-color-danger: #b91c1c;
+
+  --portal-font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --portal-font-size-base: 1rem;
+  --portal-font-size-small: 0.85rem;
+
+  --portal-space-1: 0.25rem;
+  --portal-space-2: 0.5rem;
+  --portal-space-3: 0.75rem;
+  --portal-space-4: 1rem;
+  --portal-space-6: 1.5rem;
+
+  --portal-radius: 6px;
+  --portal-border-width: 1px;
+}
+```
+
+Plus a small set of flex/grid layout utility classes (not a full utility framework — just the layout primitives the frame and a typical form-shaped SCS page already need), built on the spacing scale above:
+
+```css
+.portal-flex { display: flex; }
+.portal-flex-col { display: flex; flex-direction: column; }
+.portal-flex-wrap { flex-wrap: wrap; }
+.portal-items-center { align-items: center; }
+.portal-justify-between { justify-content: space-between; }
+.portal-gap-1 { gap: var(--portal-space-1); }
+.portal-gap-2 { gap: var(--portal-space-2); }
+.portal-gap-3 { gap: var(--portal-space-3); }
+.portal-gap-4 { gap: var(--portal-space-4); }
+
+.portal-grid { display: grid; }
+.portal-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.portal-grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+```
+
+The frame itself is the theme's first consumer, replacing what were previously hardcoded values in `portal-frame.tsx` (`#4338ca`, `#ddd`, `0.75rem 1.5rem`, etc.) with references to these same tokens — proving the token set is actually sufficient for a real component, and guaranteeing Portal's own chrome and any theme-adopting SCS's content read as one consistent surface rather than two visually disjointed halves of the page.
 
 ### Shared context
 
