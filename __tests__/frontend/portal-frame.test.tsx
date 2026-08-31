@@ -59,6 +59,21 @@ describe("PortalFrame", () => {
     expect(source).toContain("var(--portal-color-primary, #4338ca)");
   });
 
+  test("all theme tokens referenced in portal-frame.tsx are declared in theme.css", async () => {
+    const fs = await import("node:fs/promises");
+    const frameSource = await fs.readFile(new URL("../../src/frontend/portal-frame.tsx", import.meta.url), "utf8");
+    const themeSource = await fs.readFile(new URL("../../src/shell/theme.css", import.meta.url), "utf8");
+
+    // Extract all distinct --portal-* token names from var(...) calls.
+    const tokenMatches = frameSource.match(/var\(--portal-[a-z0-9-]+/g) || [];
+    const tokenNames = [...new Set(tokenMatches.map((match) => match.replace("var(", "")))];
+
+    // Assert each token is declared in theme.css.
+    for (const token of tokenNames) {
+      expect(themeSource).toContain(`${token}:`);
+    }
+  });
+
   test("a modifier-key click on an internal link does not trigger client-side navigation", async () => {
     setInitialPath("/somewhere");
     const { createRoot } = await import("react-dom/client");
