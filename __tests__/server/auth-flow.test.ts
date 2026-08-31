@@ -452,3 +452,107 @@ describe("GET /auth/providers", () => {
     expect(response.status).not.toBe(401);
   });
 });
+
+describe("configurable access-token TTL", () => {
+  let ttlProvider: ReturnType<typeof Bun.serve>;
+  let ttlPortal: ReturnType<typeof createServer>;
+
+  beforeAll(() => {
+    ttlProvider = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/token" && req.method === "POST") {
+          return new Response(JSON.stringify({ access_token: "fake-provider-access-token" }), { status: 200 });
+        }
+        if (url.pathname === "/user" && req.method === "GET") {
+          return new Response(JSON.stringify({ id: 1, email: "ttl@example.com", name: "TTL Tester" }), {
+            status: 200,
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    ttlPortal = createServer({
+      port: 0,
+      db: createDatabase(":memory:"),
+      providers: {
+        fake: {
+          name: "fake",
+          label: "Fake Provider",
+          authorizeUrl: `${ttlProvider.url}authorize`,
+          tokenUrl: `${ttlProvider.url}token`,
+          userInfoUrl: `${ttlProvider.url}user`,
+          clientId: "test-client-id",
+          clientSecret: "test-client-secret",
+          scope: "read:user",
+          mapProfile: (json: any) => ({
+            providerUserId: String(json.id),
+            email: json.email ?? null,
+            displayName: json.name ?? null,
+          }),
+        },
+      },
+      accessTokenSecret: "access-secret",
+      stateSecret: "state-secret",
+      // A value distinct from both the 900s default and any real env var
+      // this test process might happen to have set, so a false pass can't
+      // hide behind either coincidence.
+      accessTokenTtlSeconds: 42,
+    });
+  });
+
+  afterAll(() => {
+    ttlProvider.stop();
+    ttlPortal.stop();
+  });
+
+  // Regression test: expires_in used to be a separate hardcoded "900"
+  // literal, independent of what signAccessToken() actually signed the
+  // token's real exp claim with — so the two could silently drift apart if
+  // ttlSeconds was ever changed without updating this literal too. Both
+  // values now derive from the same resolved accessTokenTtlSeconds.
+  test("the OAuth callback's expires_in matches the configured TTL, not the 900s default", async () => {
+    const loginResponse = await fetch(`${ttlPortal.url}auth/login/fake`, { redirect: "manual" });
+    const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+    const cookiePair = loginResponse.headers.get("Set-Cookie")!.split(";")[0];
+
+    const callbackResponse = await fetch(
+      `${ttlPortal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
+      { redirect: "manual", headers: { Cookie: cookiePair } }
+    );
+    const location = new URL(callbackResponse.headers.get("Location")!);
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    expect(fragment.get("expires_in")).toBe("42");
+
+    const accessToken = fragment.get("access_token")!;
+    const [, payloadEncoded] = accessToken.split(".");
+    const payload = JSON.parse(Buffer.from(payloadEncoded, "base64url").toString("utf8")) as { exp: number };
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    // The real token's exp claim reflects the same 42s TTL (with slack for
+    // test execution time), not the 900s default.
+    expect(payload.exp).toBeGreaterThan(nowSeconds);
+    expect(payload.exp).toBeLessThanOrEqual(nowSeconds + 42);
+  });
+
+  test("POST /auth/refresh's expiresIn matches the configured TTL too", async () => {
+    const loginResponse = await fetch(`${ttlPortal.url}auth/login/fake`, { redirect: "manual" });
+    const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+    const cookiePair = loginResponse.headers.get("Set-Cookie")!.split(";")[0];
+    const callbackResponse = await fetch(
+      `${ttlPortal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
+      { redirect: "manual", headers: { Cookie: cookiePair } }
+    );
+    const fragment = new URLSearchParams(new URL(callbackResponse.headers.get("Location")!).hash.slice(1));
+    const refreshToken = fragment.get("refresh_token")!;
+
+    const refreshResponse = await fetch(`${ttlPortal.url}auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const body = (await refreshResponse.json()) as { expiresIn: number };
+    expect(body.expiresIn).toBe(42);
+  });
+});

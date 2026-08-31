@@ -28,6 +28,9 @@ export type ServerOptions = {
   baseUrl?: string;
   manifestRegistry?: ManifestRegistry;
   adminEmails?: string[];
+  scsRequestTimeoutMs?: number;
+  maxRequestBodySize?: number;
+  accessTokenTtlSeconds?: number;
 };
 
 function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
@@ -103,6 +106,17 @@ export function createServer(opts: ServerOptions = {}) {
   if (adminEmails.length === 0) {
     console.warn("No PORTAL_ADMIN_EMAILS configured; no user will be auto-granted portal:admin on login.");
   }
+  // Shared by both server-to-SCS proxy fetches below (bundle fetch and the
+  // GET/POST data-fragment proxy) — one timeout, one knob, rather than two
+  // independently hardcoded literals that could silently drift apart.
+  const scsRequestTimeoutMs = opts.scsRequestTimeoutMs ?? Number(process.env.PORTAL_SCS_REQUEST_TIMEOUT_MS ?? 10_000);
+  const maxRequestBodySize =
+    opts.maxRequestBodySize ?? Number(process.env.PORTAL_MAX_REQUEST_BODY_SIZE ?? 1024 * 1024);
+  // Resolved once and threaded through every signAccessToken() call and its
+  // matching expires_in/expiresIn response field below, rather than each
+  // duplicating "900" as its own literal — signAccessToken's own default is
+  // a fallback for direct/test callers only, never used here.
+  const accessTokenTtlSeconds = opts.accessTokenTtlSeconds ?? Number(process.env.PORTAL_ACCESS_TOKEN_TTL_SECONDS ?? 900);
   const manifestRegistry = opts.manifestRegistry;
   // internalTokenSecret is only resolved (and only reads INTERNAL_TOKEN_SECRET
   // / warns / can throw in production) when a manifestRegistry is actually
@@ -195,8 +209,10 @@ export function createServer(opts: ServerOptions = {}) {
     // Bun's default (128MB) is far more than any composed mutation should
     // ever need — this bounds the new inbound-body surface POST composition
     // opened up (see Request flow above), rather than leaving it at Bun's
-    // default by accident.
-    maxRequestBodySize: 1024 * 1024, // 1MB
+    // default by accident. Defaults to 1MB; override via
+    // PORTAL_MAX_REQUEST_BODY_SIZE if a real deployment's mutations need
+    // more.
+    maxRequestBodySize,
     async fetch(req) {
       const url = new URL(req.url);
 
@@ -273,7 +289,7 @@ export function createServer(opts: ServerOptions = {}) {
           if (user.email && adminEmails.includes(user.email)) {
             assignRole(db, user.id, "portal:admin");
           }
-          const accessToken = signAccessToken(user.id, accessTokenSecret);
+          const accessToken = signAccessToken(user.id, accessTokenSecret, accessTokenTtlSeconds);
           const refreshToken = createRefreshToken(db, user.id);
           // A real browser navigation lands here — under the page/data-fetch
           // split, a bare navigation only ever gets served the shell HTML, so
@@ -285,7 +301,7 @@ export function createServer(opts: ServerOptions = {}) {
           const fragment = new URLSearchParams({
             access_token: accessToken,
             refresh_token: refreshToken,
-            expires_in: "900",
+            expires_in: String(accessTokenTtlSeconds),
           });
           return Response.redirect(`${shellOrigin}/#${fragment}`, 302);
         } catch (err) {
@@ -300,8 +316,8 @@ export function createServer(opts: ServerOptions = {}) {
         if (typeof refreshToken !== "string" || !refreshToken) return json({ error: "missing refreshToken" }, 400);
         const result = verifyAndRotateRefreshToken(db, refreshToken);
         if (!result) return json({ error: "invalid or expired refresh token" }, 401);
-        const accessToken = signAccessToken(result.userId, accessTokenSecret);
-        return json({ accessToken, refreshToken: result.newToken, expiresIn: 900 });
+        const accessToken = signAccessToken(result.userId, accessTokenSecret, accessTokenTtlSeconds);
+        return json({ accessToken, refreshToken: result.newToken, expiresIn: accessTokenTtlSeconds });
       }
 
       if (url.pathname === "/auth/logout" && req.method === "POST") {
@@ -375,7 +391,7 @@ export function createServer(opts: ServerOptions = {}) {
         try {
           const bundleResponse = await fetch(`${scsEntry.baseUrl}${scsEntry.manifest.bundle}`, {
             redirect: "manual",
-            signal: AbortSignal.timeout(10_000),
+            signal: AbortSignal.timeout(scsRequestTimeoutMs),
           });
           if (bundleResponse.status >= 300 && bundleResponse.status < 400) {
             console.error(`bundle fetch for ${requestedScsName} returned an unexpected redirect`);
@@ -563,7 +579,7 @@ export function createServer(opts: ServerOptions = {}) {
               headers: proxyHeaders,
               body: proxyBody,
               redirect: "manual",
-              signal: AbortSignal.timeout(10_000),
+              signal: AbortSignal.timeout(scsRequestTimeoutMs),
             });
             if (fragmentResponse.status >= 300 && fragmentResponse.status < 400) {
               console.error(`scs fragment fetch for ${normalizedPath} returned an unexpected redirect`);

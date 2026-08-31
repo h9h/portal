@@ -832,3 +832,87 @@ describe("route composition: POST (mutations)", () => {
     expect(response.status).toBe(401);
   });
 });
+
+describe("configurable request limits", () => {
+  test("maxRequestBodySize opt rejects an oversized body with 413", async () => {
+    const limited = createServer({
+      port: 0,
+      db: createDatabase(":memory:"),
+      accessTokenSecret: ACCESS_SECRET,
+      stateSecret: "state-secret",
+      maxRequestBodySize: 100,
+    });
+    try {
+      const response = await fetch(limited.url, { method: "POST", body: "x".repeat(200) });
+      expect(response.status).toBe(413);
+    } finally {
+      limited.stop();
+    }
+  });
+
+  test("falls back to PORTAL_MAX_REQUEST_BODY_SIZE when maxRequestBodySize isn't given", async () => {
+    const original = process.env.PORTAL_MAX_REQUEST_BODY_SIZE;
+    process.env.PORTAL_MAX_REQUEST_BODY_SIZE = "100";
+    try {
+      const limited = createServer({
+        port: 0,
+        db: createDatabase(":memory:"),
+        accessTokenSecret: ACCESS_SECRET,
+        stateSecret: "state-secret",
+      });
+      try {
+        const response = await fetch(limited.url, { method: "POST", body: "x".repeat(200) });
+        expect(response.status).toBe(413);
+      } finally {
+        limited.stop();
+      }
+    } finally {
+      if (original === undefined) delete process.env.PORTAL_MAX_REQUEST_BODY_SIZE;
+      else process.env.PORTAL_MAX_REQUEST_BODY_SIZE = original;
+    }
+  });
+
+  test("scsRequestTimeoutMs opt aborts a hanging bundle fetch and returns 502", async () => {
+    const hangingScs = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/.portal/manifest") {
+          return new Response(
+            JSON.stringify({ name: "hanging", routes: [], nav: [], bundle: "/.portal/bundle.js" }),
+            { status: 200 }
+          );
+        }
+        if (url.pathname === "/.portal/bundle.js") {
+          await new Promise(() => {}); // never resolves
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const hangingRegistry = await createManifestRegistry([hangingScs.url.toString().replace(/\/$/, "")], {
+      refreshIntervalMs: 100_000,
+    });
+    const limited = createServer({
+      port: 0,
+      db: createDatabase(":memory:"),
+      accessTokenSecret: ACCESS_SECRET,
+      stateSecret: "state-secret",
+      internalTokenSecret: INTERNAL_SECRET,
+      manifestRegistry: hangingRegistry,
+      scsRequestTimeoutMs: 50,
+    });
+    try {
+      const start = Date.now();
+      const response = await fetch(`${limited.url}_scs/hanging/bundle.js`, {
+        headers: { Authorization: `Bearer ${signAccessToken(userId, ACCESS_SECRET)}` },
+      });
+      const elapsed = Date.now() - start;
+      expect(response.status).toBe(502);
+      expect(elapsed).toBeLessThan(1000);
+    } finally {
+      limited.stop();
+      hangingRegistry.stop();
+      hangingScs.stop();
+    }
+  });
+});

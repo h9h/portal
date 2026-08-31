@@ -293,4 +293,28 @@ describe("createManifestRegistry", () => {
       else process.env.PORTAL_SCS_REFRESH_INTERVAL_MS = original;
     }
   });
+
+  test("falls back to PORTAL_SCS_FETCH_TIMEOUT_MS when fetchTimeoutMs isn't given", async () => {
+    const original = process.env.PORTAL_SCS_FETCH_TIMEOUT_MS;
+    process.env.PORTAL_SCS_FETCH_TIMEOUT_MS = "50";
+    try {
+      const scs = startFakeScs(async () => {
+        await new Promise(() => {});
+        return new Response("unreachable", { status: 200 });
+      });
+
+      const start = Date.now();
+      const registry = await createManifestRegistry([baseUrlOf(scs)], { refreshIntervalMs: 100_000 });
+      registries.push(registry);
+      const elapsed = Date.now() - start;
+
+      const [entry] = registry.getManifests();
+      expect(entry.stale).toBe(true);
+      expect(elapsed).toBeGreaterThanOrEqual(40);
+      expect(elapsed).toBeLessThan(1000);
+    } finally {
+      if (original === undefined) delete process.env.PORTAL_SCS_FETCH_TIMEOUT_MS;
+      else process.env.PORTAL_SCS_FETCH_TIMEOUT_MS = original;
+    }
+  });
 });

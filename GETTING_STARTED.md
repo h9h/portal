@@ -162,6 +162,11 @@ Full list of variables Portal reads:
 | `PORTAL_ADMIN_EMAILS` | No | Comma-separated list of emails auto-granted the `portal:admin` role on first login. Empty → no user is auto-promoted to admin. |
 | `PORTAL_SCS_URLS` | No | Comma-separated base URLs of registered self-contained systems. Empty → no manifest registry, so nav/route enforcement/SCS bundle loading are all disabled. |
 | `PORTAL_SCS_REFRESH_INTERVAL_MS` | No | How often Portal re-fetches every registered SCS's manifest, in milliseconds. Defaults to `60000` (one minute). Only read when `PORTAL_SCS_URLS` is set. |
+| `PORTAL_SCS_FETCH_TIMEOUT_MS` | No | Timeout for a single SCS manifest fetch, in milliseconds. Defaults to `10000`. Only read when `PORTAL_SCS_URLS` is set. |
+| `PORTAL_SCS_REQUEST_TIMEOUT_MS` | No | Timeout for Portal's server-to-SCS proxy fetches (bundle loads and composed GET/POST data requests), in milliseconds. Defaults to `10000`. |
+| `PORTAL_MAX_REQUEST_BODY_SIZE` | No | Maximum inbound request body size Portal accepts, in bytes. Defaults to `1048576` (1MB). A larger body gets `413 Request Entity Too Large` before Portal's own handler ever runs. |
+| `PORTAL_ACCESS_TOKEN_TTL_SECONDS` | No | Access token lifetime, in seconds. Defaults to `900` (15 minutes). |
+| `PORTAL_REFRESH_TOKEN_TTL_SECONDS` | No | Refresh token lifetime, in seconds. Defaults to `2592000` (30 days). Changing this only affects tokens issued after the change. |
 
 ## 4. Run the dev server
 
