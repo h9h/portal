@@ -460,6 +460,18 @@ describe("GET /_shell/*", () => {
     expect(body).toContain("--portal-color-primary");
   });
 
+  // Consistency fix: the /_scs/:scsName/bundle.js route already sets this
+  // (an SCS-controlled route, where it stops a malicious Content-Type from
+  // being sniffed as something else); every /_shell/* asset is Portal's own
+  // fixed content, so the risk is lower, but there's no reason for the two
+  // sibling static-asset routes to disagree.
+  test("responses carry X-Content-Type-Options: nosniff", async () => {
+    const jsResponse = await fetch(`${portal.url}_shell/react.js`);
+    expect(jsResponse.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    const cssResponse = await fetch(`${portal.url}_shell/theme.css`);
+    expect(cssResponse.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
   // Fix-round regression test (whole-branch review): getShellAssets()'s
   // output never changes for the life of the process, but every /_shell/*
   // response previously had no Cache-Control or ETag at all — so every page
@@ -513,6 +525,34 @@ describe("GET /_shell/*", () => {
     } finally {
       Bun.build = originalBuild;
       __resetShellAssetsCacheForTests(); // don't leave the poisoned-then-cleared cache behind for later tests
+    }
+  });
+
+  // Regression test for the fix that split theme.css's cache out from the
+  // JS bundles': GET /_shell/theme.css must keep succeeding even while the
+  // five JS bundles are failing to build — it's a plain file read, not
+  // something a broken Bun.build call can affect, and it shouldn't share a
+  // failure mode (or, previously, a shared Promise.all) with them.
+  test("GET /_shell/theme.css still succeeds while the JS bundle build is failing", async () => {
+    __resetShellAssetsCacheForTests();
+    const originalBuild = Bun.build;
+    (Bun as unknown as { build: typeof Bun.build }).build = (() =>
+      Promise.resolve({
+        success: false,
+        logs: [{ message: "simulated build failure" }],
+        outputs: [],
+      })) as unknown as typeof Bun.build;
+
+    try {
+      const jsResponse = await fetch(`${portal.url}_shell/react.js`);
+      expect(jsResponse.status).toBe(502);
+
+      const cssResponse = await fetch(`${portal.url}_shell/theme.css`);
+      expect(cssResponse.status).toBe(200);
+      expect(await cssResponse.text()).toContain("--portal-color-primary");
+    } finally {
+      Bun.build = originalBuild;
+      __resetShellAssetsCacheForTests();
     }
   });
 

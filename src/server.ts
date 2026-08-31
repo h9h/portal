@@ -16,7 +16,7 @@ import { buildRouteTable, buildContextOwners } from "./shell/route-table";
 import { signInternalToken } from "./auth/internal-tokens";
 import { createManifestRegistry, parseScsBaseUrls, type ManifestRegistry } from "./scs/manifest-registry";
 import { renderShellHtml } from "./shell/bootstrap-html";
-import { getShellAssets } from "./shell/bundle";
+import { getShellJsBundles, getThemeCss } from "./shell/bundle";
 
 export type ServerOptions = {
   port?: number;
@@ -409,39 +409,53 @@ export function createServer(opts: ServerOptions = {}) {
       );
       if (shellAssetMatch && req.method === "GET") {
         try {
-          const assets = await getShellAssets();
-          const byName: Record<string, { body: string; contentType: string }> = {
-            react: { body: assets.reactJs, contentType: "text/javascript; charset=utf-8" },
-            "react-dom": { body: assets.reactDomJs, contentType: "text/javascript; charset=utf-8" },
-            "jsx-runtime": { body: assets.jsxRuntimeJs, contentType: "text/javascript; charset=utf-8" },
-            runtime: { body: assets.runtimeJs, contentType: "text/javascript; charset=utf-8" },
-            shell: { body: assets.shellJs, contentType: "text/javascript; charset=utf-8" },
-            theme: { body: assets.themeCss, contentType: "text/css; charset=utf-8" },
-          };
           // Two alternations, two capture groups (JS names vs. the one CSS
           // name) — this pairs each asset name with its own correct
           // extension in the regex itself, so a mismatched pair like
           // "theme.js" or "react.css" can never match at all, rather than
-          // matching and then silently serving the wrong content-type.
-          const asset = byName[shellAssetMatch[1] ?? shellAssetMatch[2]];
-          // getShellAssets() is memoized for the life of the process (its
-          // output never changes without a redeploy), but there's no
-          // versioned/hashed URL scheme yet — ETag + no-cache forces
-          // revalidation on every request instead of either re-sending
-          // ~500KB of react-dom on every navigation or blind long-term
-          // caching that can't be busted. A matching If-None-Match short-
-          // circuits to a bodyless 304, which is the only part that
-          // actually saves the re-download; the header alone does not.
-          const etag = `"${Bun.hash(asset.body).toString(16)}"`;
-          if (req.headers.get("If-None-Match") === etag) {
-            return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
+          // matching and then silently serving the wrong content-type. It
+          // also picks which cache to await: a theme.css request only waits
+          // on getThemeCss(), never on bundling the five JS assets too.
+          let body: string;
+          let contentType: string;
+          if (shellAssetMatch[2]) {
+            body = await getThemeCss();
+            contentType = "text/css; charset=utf-8";
+          } else {
+            const bundles = await getShellJsBundles();
+            const byName: Record<string, string> = {
+              react: bundles.reactJs,
+              "react-dom": bundles.reactDomJs,
+              "jsx-runtime": bundles.jsxRuntimeJs,
+              runtime: bundles.runtimeJs,
+              shell: bundles.shellJs,
+            };
+            body = byName[shellAssetMatch[1]!];
+            contentType = "text/javascript; charset=utf-8";
           }
-          return new Response(asset.body, {
+          // getShellJsBundles()/getThemeCss() are memoized for the life of
+          // the process (their output never changes without a redeploy),
+          // but there's no versioned/hashed URL scheme yet — ETag +
+          // no-cache forces revalidation on every request instead of either
+          // re-sending ~500KB of react-dom on every navigation or blind
+          // long-term caching that can't be busted. A matching
+          // If-None-Match short-circuits to a bodyless 304, which is the
+          // only part that actually saves the re-download; the header
+          // alone does not.
+          const etag = `"${Bun.hash(body).toString(16)}"`;
+          if (req.headers.get("If-None-Match") === etag) {
+            return new Response(null, {
+              status: 304,
+              headers: { ETag: etag, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" },
+            });
+          }
+          return new Response(body, {
             status: 200,
             headers: {
-              "Content-Type": asset.contentType,
+              "Content-Type": contentType,
               ETag: etag,
               "Cache-Control": "no-cache",
+              "X-Content-Type-Options": "nosniff",
             },
           });
         } catch (err) {

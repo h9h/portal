@@ -2,7 +2,12 @@ import { describe, test, expect } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getShellAssets, __resetShellAssetsCacheForTests } from "../../src/shell/bundle";
+import {
+  getShellAssets,
+  getShellJsBundles,
+  getThemeCss,
+  __resetShellAssetsCacheForTests,
+} from "../../src/shell/bundle";
 
 // Dynamically imports ESM source text by writing it to a real temp file
 // first (a data: URL works for small snippets, but Bun rejects a
@@ -188,6 +193,31 @@ describe("getShellAssets", () => {
       expect(assets.shellJs.length).toBeGreaterThan(0);
     } finally {
       Bun.build = originalBuild;
+    }
+  });
+
+  // Regression test for the fix that split theme.css's cache out from the
+  // JS bundles': theme.css is a plain file read that cannot fail the same
+  // way a Bun.build call can, so a JS build failure must not affect it —
+  // getThemeCss() should still resolve normally even while
+  // getShellJsBundles() is failing.
+  test("getThemeCss() is unaffected by a getShellJsBundles() failure", async () => {
+    __resetShellAssetsCacheForTests();
+    const originalBuild = Bun.build;
+    (Bun as unknown as { build: typeof Bun.build }).build = (() =>
+      Promise.resolve({
+        success: false,
+        logs: [{ message: "simulated build failure" }],
+        outputs: [],
+      })) as unknown as typeof Bun.build;
+
+    try {
+      await expect(getShellJsBundles()).rejects.toThrow(/simulated build failure/);
+      const themeCss = await getThemeCss();
+      expect(themeCss).toContain("--portal-color-primary");
+    } finally {
+      Bun.build = originalBuild;
+      __resetShellAssetsCacheForTests();
     }
   });
 });
