@@ -2,7 +2,9 @@
 
 Portal is a Bun/TypeScript backend-for-frontend. See `specification.md`
 for the architecture; this document only covers getting a local
-instance running.
+instance running. Building a self-contained system (SCS) that plugs into
+Portal is a separate concern — see
+[`docs/scs-contributor-guide.md`](docs/scs-contributor-guide.md).
 
 ## Prerequisites
 
