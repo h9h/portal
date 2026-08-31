@@ -484,7 +484,7 @@ export function createServer(opts: ServerOptions = {}) {
         });
       }
 
-      if (manifestRegistry && req.method === "GET") {
+      if (manifestRegistry && (req.method === "GET" || req.method === "POST")) {
         // Bind the current value of routeIndex to a local const so both reads
         // below are guaranteed to see the same snapshot, regardless of any
         // future edit that adds an `await` between them.
@@ -492,6 +492,16 @@ export function createServer(opts: ServerOptions = {}) {
         const normalizedPath = url.pathname === "/" ? url.pathname : url.pathname.replace(/\/+$/, "");
         const userId = getAuthenticatedUserId(req, accessTokenSecret);
         if (!userId) return json({ error: "unauthorized" }, 401);
+
+        // Checked before the role check below, so a wrong-method request
+        // never leaks whether the caller would otherwise have held the
+        // right role for this path (specification.md, Request flow). A path
+        // the index doesn't know at all falls through to checkAccess's own
+        // not_found below, unchanged.
+        const declaredRoute = index.routes.get(normalizedPath);
+        if (declaredRoute && !declaredRoute.methods.includes(req.method)) {
+          return json({ error: "method not allowed" }, 405);
+        }
 
         const userRoles = getUserRoles(db, userId);
         const result = checkAccess(index, normalizedPath, userRoles);
@@ -512,8 +522,14 @@ export function createServer(opts: ServerOptions = {}) {
           // which is the only way to reach this branch.
           const internalToken = signInternalToken(userId, scsRoles, route.baseUrl, internalTokenSecret!);
           try {
+            const contentType = req.headers.get("Content-Type");
             const fragmentResponse = await fetch(`${route.baseUrl}${normalizedPath}${url.search}`, {
-              headers: { Authorization: `Bearer ${internalToken}` },
+              method: req.method,
+              headers: {
+                Authorization: `Bearer ${internalToken}`,
+                ...(contentType ? { "Content-Type": contentType } : {}),
+              },
+              body: req.method === "POST" ? await req.arrayBuffer() : undefined,
               redirect: "manual",
               signal: AbortSignal.timeout(10_000),
             });

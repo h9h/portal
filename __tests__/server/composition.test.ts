@@ -14,7 +14,7 @@ const INTERNAL_SECRET = "internal-secret";
 let fakeScs: ReturnType<typeof Bun.serve>;
 let scsManifest: {
   name: string;
-  routes: { path: string; requiredRoles: string[]; component?: string }[];
+  routes: { path: string; requiredRoles: string[]; methods?: string[]; component?: string }[];
   nav: [];
   publishesContext?: string[];
 };
@@ -38,7 +38,7 @@ beforeEach(async () => {
 
   fakeScs = Bun.serve({
     port: 0,
-    fetch(req) {
+    async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === "/.portal/manifest") {
         return new Response(JSON.stringify(scsManifest), { status: 200 });
@@ -50,6 +50,18 @@ beforeEach(async () => {
           return new Response(null, { status: 302, headers: { Location: ordersRedirectTo } });
         }
         return new Response("orders fragment", { status: 200, headers: { "Content-Type": "text/plain" } });
+      }
+      if (url.pathname === "/orders/create" && req.method === "POST") {
+        receivedAuthHeader = req.headers.get("Authorization");
+        const receivedBody = await req.text();
+        return new Response(
+          JSON.stringify({
+            receivedMethod: req.method,
+            receivedBody,
+            receivedContentType: req.headers.get("Content-Type"),
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } }
+        );
       }
       if (url.pathname === "/.portal/bundle.js") {
         return new Response("export const OrdersView = () => null;", {
@@ -231,12 +243,12 @@ describe("route composition", () => {
     expect(body.error).toBeTruthy();
   });
 
-  test("a non-GET request to an enforceable path falls through to 404", async () => {
+  test("a request with a method the route doesn't declare returns 405, not 404", async () => {
     const response = await fetch(`${portal.url}orders`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(405);
   });
 
   test("the SCS fragment fetch does not follow redirects and returns a 502 instead", async () => {
@@ -609,5 +621,84 @@ describe("end-to-end: a manifest declaring bundle, component, and context fields
     const response = await fetch(`${portal.url}routes`, { headers: { Authorization: `Bearer ${accessToken}` } });
     const body = (await response.json()) as { contextOwners: Record<string, string> };
     expect(body.contextOwners).toEqual({ profile: "portal" });
+  });
+});
+
+describe("route composition: POST (mutations)", () => {
+  async function addOrdersCreateRoute() {
+    scsManifest = {
+      name: "orders",
+      routes: [
+        { path: "/orders", requiredRoles: ["orders:admin"] },
+        { path: "/orders/create", requiredRoles: ["orders:admin"], methods: ["POST"] },
+      ],
+      nav: [],
+    };
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+
+  test("a POST to a route declaring methods: [\"POST\"] is composed, forwarding the body and Content-Type to the SCS", async () => {
+    await addOrdersCreateRoute();
+    assignRole(db, userId, "orders:admin");
+
+    const response = await fetch(`${portal.url}orders/create`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ item: "widget" }),
+    });
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { receivedMethod: string; receivedBody: string; receivedContentType: string | null };
+    expect(body.receivedMethod).toBe("POST");
+    expect(body.receivedBody).toBe(JSON.stringify({ item: "widget" }));
+    expect(body.receivedContentType).toBe("application/json");
+    expect(receivedAuthHeader).toMatch(/^Bearer /);
+  });
+
+  test("a POST to a route that only declares GET returns 405", async () => {
+    await addOrdersCreateRoute();
+    assignRole(db, userId, "orders:admin");
+
+    const response = await fetch(`${portal.url}orders`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
+
+    expect(response.status).toBe(405);
+  });
+
+  test("a GET to a route that only declares POST returns 405", async () => {
+    await addOrdersCreateRoute();
+    assignRole(db, userId, "orders:admin");
+
+    const response = await fetch(`${portal.url}orders/create`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
+
+    expect(response.status).toBe(405);
+  });
+
+  test("a POST to an enforceable route the caller lacks the role for still returns a generic 403", async () => {
+    await addOrdersCreateRoute();
+
+    const response = await fetch(`${portal.url}orders/create`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+      body: JSON.stringify({ item: "widget" }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  test("an unauthenticated POST to an enforceable route returns 401, not 405", async () => {
+    await addOrdersCreateRoute();
+
+    const response = await fetch(`${portal.url}orders/create`, {
+      method: "POST",
+      headers: { "X-Portal-Data": "1" },
+      body: JSON.stringify({ item: "widget" }),
+    });
+
+    expect(response.status).toBe(401);
   });
 });
