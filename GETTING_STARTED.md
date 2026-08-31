@@ -6,6 +6,86 @@ instance running. Building a self-contained system (SCS) that plugs into
 Portal is a separate concern — see
 [`docs/scs-contributor-guide.md`](docs/scs-contributor-guide.md).
 
+## Architecture at a glance
+
+Three kinds of process, always talking through Portal — the browser never
+reaches an SCS directly, and an SCS never reaches the browser directly:
+
+```mermaid
+flowchart TB
+    subgraph Browser
+        Shell["Client Shell<br/>persistent frame + router"]
+        Mounted["Mounted SCS Component<br/>e.g. ProfileView"]
+        Runtime["@portal/runtime<br/>portalFetch, shared context"]
+    end
+
+    subgraph Portal["Portal (Backend-for-Frontend)"]
+        Auth["OAuth2 / Sessions"]
+        Routes["Route Index / Nav"]
+        Proxy["SCS Composition Proxy"]
+    end
+
+    PortalDB[("Portal SQLite<br/>users, roles, tokens")]
+    GitHub["GitHub<br/>OAuth Provider"]
+
+    subgraph SCS["SCS, e.g. scs-profile"]
+        SCSServer["HTTP Server<br/>manifest / bundle / GET+POST data routes"]
+        SCSDB[("SCS's own SQLite<br/>its own domain data")]
+    end
+
+    Shell -->|HTTPS| Portal
+    Mounted -->|HTTPS via Runtime| Portal
+    Auth --> GitHub
+    Auth --> PortalDB
+    Proxy -->|"signed internal token<br/>GET/POST proxy"| SCSServer
+    Routes -.->|built from manifest| Proxy
+    SCSServer --> SCSDB
+    Portal -.->|serves bundle.js| Mounted
+```
+
+And how a page actually loads, from the first request to a mounted
+component rendering with real data:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant P as Portal
+    participant S as SCS
+
+    B->>P: GET / (page navigation, no data marker)
+    P-->>B: 200 shell HTML (static, unauthenticated)
+    Note over B: Shell boots
+
+    B->>P: GET /me
+    alt not authenticated
+        P-->>B: 401
+        B->>P: GET /auth/providers
+        P-->>B: 200 [{name, label}, ...]
+        Note over B: renders "Sign in with GitHub"
+    else authenticated
+        P-->>B: 200 {id, roles, displayName, ...}
+        B->>P: GET /routes
+        P-->>B: 200 {routes, contextOwners}
+        B->>P: GET /nav
+        P-->>B: 200 {nav}
+        Note over B: client router resolves the current path
+
+        B->>P: GET /_scs/:scsName/bundle.js<br/>(Authorization: Bearer access token)
+        P->>S: GET /.portal/bundle.js
+        S-->>P: 200 bundle.js
+        P-->>B: 200 bundle.js
+        Note over B: mounts the component from a blob: URL,<br/>sharing Portal's one React instance
+
+        B->>P: GET {path} (X-Portal-Data: 1,<br/>Authorization: Bearer access token)
+        P->>P: check role, sign internal token
+        P->>S: GET {path} (Authorization: Bearer internal token)
+        S-->>P: 200 data
+        P-->>B: 200 data
+        Note over B: component renders with real data
+    end
+```
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) (developed against 1.3.x)
