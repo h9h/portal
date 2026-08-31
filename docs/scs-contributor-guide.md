@@ -277,6 +277,50 @@ publish partial or stale values).
 `scs-profile`'s own `specification.md` (`Running it` section) has the
 exact env var names and a worked example of this whole sequence — copy it.
 
+## 7. Adopting Portal's shared theme (optional)
+
+Portal serves `GET /_shell/theme.css` — CSS custom properties (`--portal-*`
+design tokens: colors, spacing, typography, border) plus a small set of
+flex/grid utility classes. The shell's bootstrap HTML links it once, and
+because CSS custom properties inherit through the whole document, every
+mounted SCS component gets them for free: no import, no build-time
+dependency, no coupling to `@portal/runtime`. You opt in just by
+referencing a token in your own component's styles or a `<style>` tag it
+renders itself; ignoring it costs you nothing either.
+
+Reference a token with a **literal fallback**, never bare:
+
+```tsx
+style={{
+  border: "var(--portal-border-width, 1px) solid var(--portal-color-border, #ddd)",
+  borderRadius: "var(--portal-radius, 6px)",
+}}
+```
+
+The fallback isn't decoration — it's what renders if `theme.css` hasn't
+loaded yet, or if your component is rendered in isolation (e.g. under
+test) outside Portal's shell. `scs-profile`'s `ProfileView` does exactly
+this: its layout uses the utility classes (`portal-flex portal-flex-col
+portal-gap-4`, etc.) for structure, and inline styles referencing tokens
+for anything the utilities don't cover (colors, borders, radius) — read
+its source directly for the full pattern, including its component
+source-text test (`__tests__/profile-view.test.tsx`) that guards against
+a token reference silently drifting from what `theme.css` actually
+declares.
+
+This is a real contract, not just a convenience: adding a new token or
+utility class is backward compatible, but Portal renaming or removing one
+your component already depends on is a breaking change — the same
+stability expectation the manifest schema and internal-token format carry
+elsewhere. See `specification.md`'s **Shared theme** subsection for the
+full current token/utility list.
+
+Note that font family and base text color already cascade down from
+Portal's own frame (it sets both via `--portal-font-family` and
+`--portal-color-text` on its top-level wrapper) — you don't need to
+redeclare those in your own component; only reference tokens for values
+genuinely specific to it.
+
 ## Where to go from here
 
 Clone `scs-profile`, run its own tests (`bun test`), read its five source
