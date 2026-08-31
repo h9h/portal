@@ -4,6 +4,7 @@ export type RouteIndexEntry = {
   scsName: string;
   baseUrl: string;
   requiredRoles: string[];
+  methods: string[];
   component?: string;
 };
 
@@ -38,6 +39,7 @@ export function buildRouteIndex(entries: ManifestEntry[]): RouteIndex {
           scsName,
           baseUrl: entry.baseUrl,
           requiredRoles: [...route.requiredRoles],
+          methods: [...route.methods],
           ...(route.component ? { component: route.component } : {}),
         });
       }

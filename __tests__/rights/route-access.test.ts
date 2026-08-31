@@ -4,10 +4,20 @@ import type { ManifestEntry } from "../../src/scs/manifest-registry";
 import { createDatabase } from "../../src/db";
 import { assignRole, getUserRoles } from "../../src/rights/roles";
 
-function entry(name: string, routes: { path: string; requiredRoles: string[] }[], stale = false): ManifestEntry {
+function entry(
+  name: string,
+  routes: { path: string; requiredRoles: string[]; methods?: string[] }[],
+  stale = false
+): ManifestEntry {
   return {
     baseUrl: `http://${name}.local`,
-    manifest: { name, routes, nav: [], publishesContext: [], consumesContext: [] },
+    manifest: {
+      name,
+      routes: routes.map((route) => ({ ...route, methods: route.methods ?? ["GET"] })),
+      nav: [],
+      publishesContext: [],
+      consumesContext: [],
+    },
     stale,
     lastFetchedAt: stale ? null : Date.now(),
   };
@@ -26,6 +36,7 @@ describe("buildRouteIndex", () => {
       scsName: "orders",
       baseUrl: "http://orders.local",
       requiredRoles: ["orders:viewer"],
+      methods: ["GET"],
     });
     expect(index.collisions).toEqual([]);
   });
@@ -63,6 +74,7 @@ describe("buildRouteIndex", () => {
       scsName: "orders",
       baseUrl: "http://orders.local",
       requiredRoles: ["orders:viewer"],
+      methods: ["GET"],
     });
   });
 
@@ -90,6 +102,7 @@ describe("buildRouteIndex", () => {
       scsName: "orders",
       baseUrl: "http://orders.local",
       requiredRoles: ["orders:viewer"],
+      methods: ["GET"],
     });
   });
 
@@ -99,7 +112,7 @@ describe("buildRouteIndex", () => {
         baseUrl: "http://orders.local",
         manifest: {
           name: "orders",
-          routes: [{ path: "/orders", requiredRoles: [], component: "OrdersView" }],
+          routes: [{ path: "/orders", requiredRoles: [], methods: ["GET"], component: "OrdersView" }],
           nav: [],
           publishesContext: [],
           consumesContext: [],
@@ -117,7 +130,7 @@ describe("buildRouteIndex", () => {
         baseUrl: "http://orders.local",
         manifest: {
           name: "orders",
-          routes: [{ path: "/orders/summary", requiredRoles: [] }],
+          routes: [{ path: "/orders/summary", requiredRoles: [], methods: ["GET"] }],
           nav: [],
           publishesContext: [],
           consumesContext: [],
@@ -127,6 +140,18 @@ describe("buildRouteIndex", () => {
       },
     ]);
     expect(index.routes.get("/orders/summary")?.component).toBeUndefined();
+  });
+
+  test("propagates a route's declared methods into the index", () => {
+    const index = buildRouteIndex([
+      entry("orders", [{ path: "/orders/create", requiredRoles: ["orders:editor"], methods: ["POST"] }]),
+    ]);
+    expect(index.routes.get("/orders/create")?.methods).toEqual(["POST"]);
+  });
+
+  test("defaults a route's methods to [\"GET\"] in the index when the manifest omitted it", () => {
+    const index = buildRouteIndex([entry("orders", [{ path: "/orders", requiredRoles: [] }])]);
+    expect(index.routes.get("/orders")?.methods).toEqual(["GET"]);
   });
 });
 
