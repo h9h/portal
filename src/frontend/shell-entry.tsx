@@ -100,7 +100,15 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
   // display-only (see specification.md, Context model), and now allows
   // anonymous callers, so this can run regardless of auth state. A failure
   // here must never affect `status` — it just leaves the nav space empty.
+  //
+  // Wait for identity to resolve first — /me's own fetch above transparently
+  // refreshes a stale access token via portalFetch; firing this effect only
+  // once `me` has settled means /nav always runs with that same
+  // already-refreshed token, instead of possibly racing it with a stale one
+  // (which would otherwise treat a signed-in user as anonymous for nav
+  // purposes until the next full page reload).
   useEffect(() => {
+    if (me === undefined) return;
     (async () => {
       try {
         const navResponse = await portalFetch("/nav");
@@ -111,7 +119,7 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
         console.error("nav fetch failed", err);
       }
     })();
-  }, []);
+  }, [me]);
 
   // Resolve + mount whenever the path (via usePortalNavigate/popstate) or the
   // loaded route table changes.

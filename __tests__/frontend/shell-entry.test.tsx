@@ -64,7 +64,7 @@ describe("shell App", () => {
       await flush(act);
 
       expect(container.textContent).toContain("GitHub");
-      const link = container.querySelector('a[href="/auth/login/github"]') as HTMLAnchorElement | null;
+      const link = container.querySelector('main a[href="/auth/login/github"]') as HTMLAnchorElement | null;
       expect(link?.getAttribute("href")).toBe("/auth/login/github");
     } finally {
       await act(async () => {
@@ -130,7 +130,7 @@ describe("shell App", () => {
       await flush(act);
 
       expect(container.textContent).toContain("failed");
-      expect(container.textContent).toContain("GitHub");
+      expect(container.querySelector("main")?.textContent).toContain("GitHub");
       expect(window.location.hash).toBe("");
     } finally {
       await act(async () => {
@@ -467,6 +467,71 @@ describe("shell App", () => {
         root.unmount();
       });
       restore();
+    }
+  });
+
+  // Fix-round regression test (whole-branch review): the /nav effect used to
+  // have a `[]` dependency array, firing in parallel with /me at boot instead
+  // of after it — so a stale-but-present access token left navItems stuck
+  // showing only public entries even once /me's own portalFetch had
+  // transparently refreshed the token and resolved to an authenticated
+  // session. Deliberately holds the /me fetch open to prove /nav is never
+  // called while `me` is still undefined, then lets /me resolve and confirms
+  // /nav is called only after.
+  test("the /nav effect waits for identity to resolve before firing", async () => {
+    setInitialPath("/");
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    let resolveMe: (() => void) | null = null;
+    globalThis.fetch = mock(async (input: any) => {
+      const url = new URL(String(input), "http://localhost");
+      calls.push(url.pathname);
+      if (url.pathname === "/me") {
+        await new Promise<void>((resolve) => {
+          resolveMe = resolve;
+        });
+        return new Response(
+          JSON.stringify({ id: "u1", roles: [], displayName: "Ada Lovelace", email: null }),
+          { status: 200 }
+        );
+      }
+      if (url.pathname === "/routes") {
+        return new Response(JSON.stringify({ routes: [], contextOwners: {} }), { status: 200 });
+      }
+      if (url.pathname === "/nav") {
+        return new Response(JSON.stringify({ nav: [] }), { status: 200 });
+      }
+      return new Response("not mocked", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+
+      // /me is deliberately still in-flight here (held open by resolveMe not
+      // having been called yet) — /nav must not have been fetched yet.
+      expect(calls).not.toContain("/nav");
+
+      await act(async () => {
+        resolveMe!();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await flush(act);
+
+      expect(calls).toContain("/nav");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      globalThis.fetch = originalFetch;
     }
   });
 });

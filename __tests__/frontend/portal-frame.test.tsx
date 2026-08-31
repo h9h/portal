@@ -46,6 +46,48 @@ describe("PortalFrame", () => {
     }
   });
 
+  test("a modifier-key click on an internal link does not trigger client-side navigation", async () => {
+    setInitialPath("/somewhere");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <PortalFrame me={undefined} providers={[]} navItems={[]}>
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+
+      const logoLink = container.querySelector('a[href="/"]') as HTMLAnchorElement;
+      // Note: happy-dom, unlike a real browser, *does* perform the anchor's
+      // own default navigation on an unprevented click regardless of
+      // modifier keys — so window.location.pathname changing on its own
+      // isn't proof of anything here (it would change either way: via our
+      // click handler's own history.pushState if the guard were broken, or
+      // via happy-dom's default navigation if the guard correctly bails
+      // out). What actually distinguishes the two is whether the handler
+      // called preventDefault(): it does so only on the branch that calls
+      // navigate() — a modifier-key click must take the early-return branch
+      // and leave the event unprevented, letting normal <a> semantics run.
+      let event!: MouseEvent;
+      await act(async () => {
+        event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true });
+        logoLink.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
   test("renders one nav link per item keyed by domain+path, and clicking one navigates client-side", async () => {
     setInitialPath("/");
     const { createRoot } = await import("react-dom/client");
