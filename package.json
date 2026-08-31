@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --watch src/server.ts",
+    "dev": "bun --env-file=.env.dev --watch src/server.ts",
     "start": "bun src/server.ts",
+    "start:prod": "NODE_ENV=production bun --env-file=.env.production src/server.ts",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
   },
