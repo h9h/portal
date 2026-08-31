@@ -322,9 +322,12 @@ export function createServer(opts: ServerOptions = {}) {
       }
 
       if (url.pathname === "/nav" && req.method === "GET") {
+        // Unlike /me and /routes, an unauthenticated caller is treated as
+        // holding no roles rather than rejected — the persistent portal
+        // frame needs to show public nav entries before login (see
+        // specification.md, Context model: This stage's nav model).
         const userId = getAuthenticatedUserId(req, accessTokenSecret);
-        if (!userId) return json({ error: "unauthorized" }, 401);
-        const userRoles = getUserRoles(db, userId);
+        const userRoles = userId ? getUserRoles(db, userId) : [];
         // Unlike routeIndex (cached, refreshed via onUpdate), /nav reads the
         // manifest registry live on every request — buildNav is cheap enough
         // not to need caching. This means /nav can briefly disagree with

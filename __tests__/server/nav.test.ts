@@ -61,9 +61,11 @@ afterEach(() => {
 });
 
 describe("GET /nav", () => {
-  test("an unauthenticated request returns 401", async () => {
+  test("an unauthenticated request returns only public nav entries instead of 401", async () => {
     const response = await fetch(`${portal.url}nav`);
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { nav: { label: string; path: string; domain: string }[] };
+    expect(body.nav).toEqual([{ label: "Orders Home", path: "/orders", domain: "orders" }]);
   });
 
   test("returns only the nav entries the user's roles satisfy", async () => {
