@@ -404,18 +404,19 @@ export function createServer(opts: ServerOptions = {}) {
         }
       }
 
-      const shellAssetMatch = url.pathname.match(/^\/_shell\/(react|react-dom|jsx-runtime|runtime|shell)\.js$/);
+      const shellAssetMatch = url.pathname.match(/^\/_shell\/(react|react-dom|jsx-runtime|runtime|shell|theme)\.(js|css)$/);
       if (shellAssetMatch && req.method === "GET") {
         try {
           const assets = await getShellAssets();
-          const byName: Record<string, string> = {
-            react: assets.reactJs,
-            "react-dom": assets.reactDomJs,
-            "jsx-runtime": assets.jsxRuntimeJs,
-            runtime: assets.runtimeJs,
-            shell: assets.shellJs,
+          const byName: Record<string, { body: string; contentType: string }> = {
+            react: { body: assets.reactJs, contentType: "text/javascript; charset=utf-8" },
+            "react-dom": { body: assets.reactDomJs, contentType: "text/javascript; charset=utf-8" },
+            "jsx-runtime": { body: assets.jsxRuntimeJs, contentType: "text/javascript; charset=utf-8" },
+            runtime: { body: assets.runtimeJs, contentType: "text/javascript; charset=utf-8" },
+            shell: { body: assets.shellJs, contentType: "text/javascript; charset=utf-8" },
+            theme: { body: assets.themeCss, contentType: "text/css; charset=utf-8" },
           };
-          const body = byName[shellAssetMatch[1]];
+          const asset = byName[shellAssetMatch[1]];
           // getShellAssets() is memoized for the life of the process (its
           // output never changes without a redeploy), but there's no
           // versioned/hashed URL scheme yet — ETag + no-cache forces
@@ -424,14 +425,14 @@ export function createServer(opts: ServerOptions = {}) {
           // caching that can't be busted. A matching If-None-Match short-
           // circuits to a bodyless 304, which is the only part that
           // actually saves the re-download; the header alone does not.
-          const etag = `"${Bun.hash(body).toString(16)}"`;
+          const etag = `"${Bun.hash(asset.body).toString(16)}"`;
           if (req.headers.get("If-None-Match") === etag) {
             return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
           }
-          return new Response(body, {
+          return new Response(asset.body, {
             status: 200,
             headers: {
-              "Content-Type": "text/javascript; charset=utf-8",
+              "Content-Type": asset.contentType,
               ETag: etag,
               "Cache-Control": "no-cache",
             },

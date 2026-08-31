@@ -452,6 +452,14 @@ describe("GET /_shell/*", () => {
     }
   });
 
+  test("serves theme.css unauthenticated, with a CSS content-type", async () => {
+    const response = await fetch(`${portal.url}_shell/theme.css`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
+    const body = await response.text();
+    expect(body).toContain("--portal-color-primary");
+  });
+
   // Fix-round regression test (whole-branch review): getShellAssets()'s
   // output never changes for the life of the process, but every /_shell/*
   // response previously had no Cache-Control or ETag at all — so every page

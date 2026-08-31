@@ -40,4 +40,9 @@ describe("renderShellHtml", () => {
     const html = renderShellHtml();
     expect(html).toContain("body{margin:0}");
   });
+
+  test("links the shared theme stylesheet", () => {
+    const html = renderShellHtml();
+    expect(html).toContain('<link rel="stylesheet" href="/_shell/theme.css"');
+  });
 });

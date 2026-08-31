@@ -1,0 +1,42 @@
+/* Portal's shared theme: design tokens + a small flex/grid utility layer.
+   Served publicly (no auth) at GET /_shell/theme.css and linked once by the
+   shell's bootstrap HTML — see specification.md, Client shell: Shared
+   theme, for the stability contract these names carry (adding a token or
+   class is backward compatible; renaming/removing one is not). */
+
+:root {
+  --portal-color-primary: #4338ca;
+  --portal-color-primary-contrast: #ffffff;
+  --portal-color-text: #1a1a1a;
+  --portal-color-text-muted: #666666;
+  --portal-color-border: #dddddd;
+  --portal-color-surface: #ffffff;
+  --portal-color-danger: #b91c1c;
+
+  --portal-font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --portal-font-size-base: 1rem;
+  --portal-font-size-small: 0.85rem;
+
+  --portal-space-1: 0.25rem;
+  --portal-space-2: 0.5rem;
+  --portal-space-3: 0.75rem;
+  --portal-space-4: 1rem;
+  --portal-space-6: 1.5rem;
+
+  --portal-radius: 6px;
+  --portal-border-width: 1px;
+}
+
+.portal-flex { display: flex; }
+.portal-flex-col { display: flex; flex-direction: column; }
+.portal-flex-wrap { flex-wrap: wrap; }
+.portal-items-center { align-items: center; }
+.portal-justify-between { justify-content: space-between; }
+.portal-gap-1 { gap: var(--portal-space-1); }
+.portal-gap-2 { gap: var(--portal-space-2); }
+.portal-gap-3 { gap: var(--portal-space-3); }
+.portal-gap-4 { gap: var(--portal-space-4); }
+
+.portal-grid { display: grid; }
+.portal-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.portal-grid-cols-3 { grid-template-columns: repeat(3, 1fr); }

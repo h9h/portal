@@ -4,6 +4,7 @@ export type ShellAssets = {
   jsxRuntimeJs: string;
   runtimeJs: string;
   shellJs: string;
+  themeCss: string;
 };
 
 let cached: Promise<ShellAssets> | null = null;
@@ -16,7 +17,7 @@ let cached: Promise<ShellAssets> | null = null;
 export function getShellAssets(): Promise<ShellAssets> {
   if (!cached) {
     const build = (async () => {
-      const [reactJs, reactDomJs, jsxRuntimeJs, runtimeJs, shellJs] = await Promise.all([
+      const [reactJs, reactDomJs, jsxRuntimeJs, runtimeJs, shellJs, themeCss] = await Promise.all([
         buildOne(new URL("./vendor/react-entry.ts", import.meta.url).pathname),
         buildOne(new URL("./vendor/react-dom-entry.ts", import.meta.url).pathname, ["react"]),
         buildOne(new URL("./vendor/jsx-runtime-entry.ts", import.meta.url).pathname),
@@ -26,8 +27,12 @@ export function getShellAssets(): Promise<ShellAssets> {
           "react-dom/client",
           "@portal/runtime",
         ]),
+        // theme.css is plain, hand-written CSS — no Bun.build needed, just
+        // read the file. Cached alongside the built assets for the same
+        // reason: its content never changes without a redeploy.
+        Bun.file(new URL("./theme.css", import.meta.url).pathname).text(),
       ]);
-      return { reactJs, reactDomJs, jsxRuntimeJs, runtimeJs, shellJs };
+      return { reactJs, reactDomJs, jsxRuntimeJs, runtimeJs, shellJs, themeCss };
     })();
     // A transient failure (e.g. a passing but temporarily broken build)
     // must not poison every future call for the rest of the process's

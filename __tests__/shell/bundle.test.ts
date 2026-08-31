@@ -30,6 +30,15 @@ describe("getShellAssets", () => {
     expect(assets.shellJs.length).toBeGreaterThan(0);
   });
 
+  test("also loads theme.css, containing the documented tokens and utility classes", async () => {
+    const assets = await getShellAssets();
+    expect(assets.themeCss.length).toBeGreaterThan(0);
+    expect(assets.themeCss).toContain("--portal-color-primary");
+    expect(assets.themeCss).toContain("--portal-space-4");
+    expect(assets.themeCss).toContain(".portal-flex");
+    expect(assets.themeCss).toContain(".portal-grid-cols-2");
+  });
+
   test("the react-dom bundle imports react as an external, not a bundled copy", async () => {
     const assets = await getShellAssets();
     expect(assets.reactDomJs).toMatch(/from\s*["']react["']/);
