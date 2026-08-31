@@ -209,9 +209,7 @@ export function createServer(opts: ServerOptions = {}) {
     // Bun's default (128MB) is far more than any composed mutation should
     // ever need — this bounds the new inbound-body surface POST composition
     // opened up (see Request flow above), rather than leaving it at Bun's
-    // default by accident. Defaults to 1MB; override via
-    // PORTAL_MAX_REQUEST_BODY_SIZE if a real deployment's mutations need
-    // more.
+    // default by accident.
     maxRequestBodySize,
     async fetch(req) {
       const url = new URL(req.url);

@@ -8,10 +8,6 @@ export type ManifestEntry = {
 };
 
 export type ManifestRegistryOptions = {
-  // opts.refreshIntervalMs/fetchTimeoutMs always win (test injection);
-  // unset falls back to PORTAL_SCS_REFRESH_INTERVAL_MS/
-  // PORTAL_SCS_FETCH_TIMEOUT_MS, then a hardcoded default — the same
-  // opts-then-env precedence createServer's own options follow.
   refreshIntervalMs?: number;
   fetchFn?: typeof fetch;
   fetchTimeoutMs?: number;

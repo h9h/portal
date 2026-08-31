@@ -147,26 +147,10 @@ export GITHUB_CLIENT_ID=<client id from step 2>
 export GITHUB_CLIENT_SECRET=<client secret from step 2>
 ```
 
-Full list of variables Portal reads:
-
-| Variable | Required? | Purpose |
-|---|---|---|
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Needed for GitHub sign-in to work | OAuth App credentials from step 2. Missing → boot-time warning + `/auth/login/github` fails with a clear redirect instead of reaching GitHub. |
-| `NODE_ENV` | No | `"production"` enables strict mode: missing signing secrets throw at boot instead of warning, and the OAuth state cookie is marked `Secure`. Anything else behaves as development. |
-| `ACCESS_TOKEN_SECRET` | Required in production | Signs access tokens. Outside production, falls back to an insecure hardcoded dev default with a warning. |
-| `STATE_SECRET` | Required in production | Signs the OAuth CSRF state parameter. Same fallback behavior as `ACCESS_TOKEN_SECRET`. |
-| `INTERNAL_TOKEN_SECRET` | Required in production, only if `PORTAL_SCS_URLS` is set | Signs internal service-to-service tokens for SCS bundle/manifest fetches. Not resolved at all when no manifest registry is configured. |
-| `DATABASE_PATH` | No | SQLite file path. Defaults to `portal.sqlite` in the working directory. |
-| `PORT` | No | Server port. Defaults to `3000`. |
-| `PORTAL_BASE_URL` | No | Overrides the base URL used to build OAuth redirect/callback URIs. Defaults to the incoming request's own origin. Set this if Portal runs behind a reverse proxy or a different public hostname. |
-| `PORTAL_ADMIN_EMAILS` | No | Comma-separated list of emails auto-granted the `portal:admin` role on first login. Empty → no user is auto-promoted to admin. |
-| `PORTAL_SCS_URLS` | No | Comma-separated base URLs of registered self-contained systems. Empty → no manifest registry, so nav/route enforcement/SCS bundle loading are all disabled. |
-| `PORTAL_SCS_REFRESH_INTERVAL_MS` | No | How often Portal re-fetches every registered SCS's manifest, in milliseconds. Defaults to `60000` (one minute). Only read when `PORTAL_SCS_URLS` is set. |
-| `PORTAL_SCS_FETCH_TIMEOUT_MS` | No | Timeout for a single SCS manifest fetch, in milliseconds. Defaults to `10000`. Only read when `PORTAL_SCS_URLS` is set. |
-| `PORTAL_SCS_REQUEST_TIMEOUT_MS` | No | Timeout for Portal's server-to-SCS proxy fetches (bundle loads and composed GET/POST data requests), in milliseconds. Defaults to `10000`. |
-| `PORTAL_MAX_REQUEST_BODY_SIZE` | No | Maximum inbound request body size Portal accepts, in bytes. Defaults to `1048576` (1MB). A larger body gets `413 Request Entity Too Large` before Portal's own handler ever runs. |
-| `PORTAL_ACCESS_TOKEN_TTL_SECONDS` | No | Access token lifetime, in seconds. Defaults to `900` (15 minutes). |
-| `PORTAL_REFRESH_TOKEN_TTL_SECONDS` | No | Refresh token lifetime, in seconds. Defaults to `2592000` (30 days). Changing this only affects tokens issued after the change. |
+That's enough to run Portal standalone. For the full list of variables
+Portal reads (SCS registration, timeouts, token lifetimes, request limits),
+their defaults, and a complete example `.env`, see
+[`docs/environment-configuration.md`](docs/environment-configuration.md).
 
 ## 4. Run the dev server
 

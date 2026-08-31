@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 
-// Defaults to 30 days; override via PORTAL_REFRESH_TOKEN_TTL_SECONDS.
 // Changing this only affects refresh tokens issued after the change —
 // tokens already stored carry their own already-computed expiresAt.
 const REFRESH_TOKEN_TTL_SECONDS = Number(process.env.PORTAL_REFRESH_TOKEN_TTL_SECONDS ?? 60 * 60 * 24 * 30);
