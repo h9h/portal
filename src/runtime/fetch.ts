@@ -1,9 +1,20 @@
 import { getStoredTokens, storeTokens, clearTokens, getSessionEpoch } from "./auth";
 
+// GET (or method-less, which defaults to GET) is the only method safe to
+// silently retry on 401 — retrying a read has no side effects. A composed
+// POST's 401 might be Portal's own "your token is stale" (never reached the
+// SCS) or the SCS's own 401 forwarded verbatim (already reached and possibly
+// processed by the SCS) — portalFetch can't tell these apart, and retrying
+// the latter would resubmit an already-processed mutation. See
+// specification.md, Token storage and refresh.
+function isRetriableMethod(method: string | undefined): boolean {
+  return !method || method.toUpperCase() === "GET";
+}
+
 export async function portalFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const stored = getStoredTokens();
   const response = await fetch(input, { ...init, headers: buildHeaders(input, init, stored?.accessToken) });
-  if (response.status !== 401 || !stored) return response;
+  if (response.status !== 401 || !stored || !isRetriableMethod(init.method)) return response;
 
   const refreshed = await refreshTokens();
   if (!refreshed) return response;

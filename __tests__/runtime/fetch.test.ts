@@ -131,6 +131,27 @@ describe("portalFetch — Authorization + refresh", () => {
     }
   });
 
+  test("does not retry a non-GET request on 401, even with a valid refresh token stored", async () => {
+    const { storeTokens } = await import("../../src/runtime/auth");
+    storeTokens({ accessToken: "expired", refreshToken: "refresh-1" });
+
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = mock((input: any) => {
+      calls.push(String(input));
+      return Promise.resolve(new Response("unauthorized", { status: 401 }));
+    }) as unknown as typeof fetch;
+
+    try {
+      const { portalFetch } = await import("../../src/runtime/fetch");
+      const response = await portalFetch("/orders/create", { method: "POST", body: JSON.stringify({}) });
+      expect(response.status).toBe(401);
+      expect(calls).toEqual(["/orders/create"]); // no /auth/refresh call, no retry
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("if refresh itself fails, the original 401 is returned and stored tokens are cleared", async () => {
     const { storeTokens, getStoredTokens } = await import("../../src/runtime/auth");
     storeTokens({ accessToken: "expired", refreshToken: "revoked" });

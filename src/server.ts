@@ -192,6 +192,11 @@ export function createServer(opts: ServerOptions = {}) {
 
   return Bun.serve({
     port: opts.port ?? 3000,
+    // Bun's default (128MB) is far more than any composed mutation should
+    // ever need — this bounds the new inbound-body surface POST composition
+    // opened up (see Request flow above), rather than leaving it at Bun's
+    // default by accident.
+    maxRequestBodySize: 1024 * 1024, // 1MB
     async fetch(req) {
       const url = new URL(req.url);
 
