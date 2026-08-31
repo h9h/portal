@@ -404,7 +404,9 @@ export function createServer(opts: ServerOptions = {}) {
         }
       }
 
-      const shellAssetMatch = url.pathname.match(/^\/_shell\/(react|react-dom|jsx-runtime|runtime|shell|theme)\.(js|css)$/);
+      const shellAssetMatch = url.pathname.match(
+        /^\/_shell\/(?:(react|react-dom|jsx-runtime|runtime|shell)\.js|(theme)\.css)$/
+      );
       if (shellAssetMatch && req.method === "GET") {
         try {
           const assets = await getShellAssets();
@@ -416,7 +418,12 @@ export function createServer(opts: ServerOptions = {}) {
             shell: { body: assets.shellJs, contentType: "text/javascript; charset=utf-8" },
             theme: { body: assets.themeCss, contentType: "text/css; charset=utf-8" },
           };
-          const asset = byName[shellAssetMatch[1]];
+          // Two alternations, two capture groups (JS names vs. the one CSS
+          // name) — this pairs each asset name with its own correct
+          // extension in the regex itself, so a mismatched pair like
+          // "theme.js" or "react.css" can never match at all, rather than
+          // matching and then silently serving the wrong content-type.
+          const asset = byName[shellAssetMatch[1] ?? shellAssetMatch[2]];
           // getShellAssets() is memoized for the life of the process (its
           // output never changes without a redeploy), but there's no
           // versioned/hashed URL scheme yet — ETag + no-cache forces

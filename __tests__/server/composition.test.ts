@@ -515,6 +515,26 @@ describe("GET /_shell/*", () => {
       __resetShellAssetsCacheForTests(); // don't leave the poisoned-then-cleared cache behind for later tests
     }
   });
+
+  // A plain GET with no X-Portal-Data header always falls through to the
+  // page-navigation shell fallback (line ~493) for ANY unmatched path — see
+  // "a totally unknown path also returns the shell HTML (SPA fallback)"
+  // above — so a mismatched pair like theme.js can never reach the final
+  // `/routes`-style 404 either; what actually proves the regex fix is that
+  // it no longer serves the *wrong asset's* body/content-type (CSS at a
+  // .js URL, or vice versa) — it gets the same shell-HTML fallback as any
+  // other unrecognized path.
+  test("does not serve mismatched name/extension pairs (e.g. theme.js or react.css) — falls through to the shell fallback instead", async () => {
+    const wrongExtension = await fetch(`${portal.url}_shell/theme.js`);
+    expect(wrongExtension.status).toBe(200);
+    expect(wrongExtension.headers.get("Content-Type")).toContain("text/html");
+    expect(await wrongExtension.text()).toContain('id="portal-root"');
+
+    const wrongExtension2 = await fetch(`${portal.url}_shell/react.css`);
+    expect(wrongExtension2.status).toBe(200);
+    expect(wrongExtension2.headers.get("Content-Type")).toContain("text/html");
+    expect(await wrongExtension2.text()).toContain('id="portal-root"');
+  });
 });
 
 describe("manifest name collisions across distinct base URLs", () => {
