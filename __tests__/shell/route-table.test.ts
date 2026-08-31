@@ -9,7 +9,7 @@ function entry(name: string, opts: { routes?: any[]; publishesContext?: string[]
     baseUrl: `http://${name}.local`,
     manifest: {
       name,
-      routes: opts.routes ?? [],
+      routes: (opts.routes ?? []).map((route) => ({ methods: ["GET"], ...route })),
       nav: [],
       publishesContext: opts.publishesContext ?? [],
       consumesContext: [],
