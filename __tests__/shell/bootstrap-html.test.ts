@@ -32,4 +32,12 @@ describe("renderShellHtml", () => {
     const html = renderShellHtml();
     expect(html.trim().toLowerCase().startsWith("<!doctype html>")).toBe(true);
   });
+
+  // Without this, the browser default body margin (8px) makes the frame's
+  // 100vh page div taller than the viewport, producing a permanent
+  // scrollbar on every page.
+  test("resets the body margin so the frame's 100vh layout doesn't overflow the viewport", () => {
+    const html = renderShellHtml();
+    expect(html).toContain("body{margin:0}");
+  });
 });

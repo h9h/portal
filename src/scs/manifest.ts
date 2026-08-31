@@ -5,8 +5,6 @@ export type RouteEntry = {
   component?: string;
 };
 
-const ALLOWED_METHODS = new Set(["GET", "POST"]);
-
 export type NavEntry = {
   label: string;
   path: string;
@@ -25,6 +23,8 @@ export type SCSManifest = {
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
+
+const ALLOWED_METHODS = new Set(["GET", "POST"]);
 
 function parseRouteEntry(value: unknown): RouteEntry | null {
   if (typeof value !== "object" || value === null) return null;
@@ -57,6 +57,13 @@ function parseNavEntry(value: unknown): NavEntry | null {
   if (typeof obj.label !== "string" || typeof obj.path !== "string" || !isStringArray(obj.requiredRoles)) {
     return null;
   }
+  // Nav paths render directly into the persistent header's <a href>/
+  // client-side navigate target — reject anything that isn't a same-origin
+  // absolute path, so a misconfigured or compromised SCS can't point the
+  // persistent chrome at an external URL. A leading "//" is protocol-relative
+  // (browser treats it as a different origin), not a same-origin path, even
+  // though it also starts with a single "/".
+  if (!obj.path.startsWith("/") || obj.path.startsWith("//")) return null;
   return { label: obj.label, path: obj.path, requiredRoles: obj.requiredRoles };
 }
 

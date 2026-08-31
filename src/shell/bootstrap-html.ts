@@ -15,6 +15,7 @@ export function renderShellHtml(): string {
 <head>
 <meta charset="utf-8" />
 <title>Portal</title>
+<style>body{margin:0}</style>
 <script type="importmap">${JSON.stringify(importMap, null, 2)}</script>
 </head>
 <body>

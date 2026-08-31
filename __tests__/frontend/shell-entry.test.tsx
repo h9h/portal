@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, spyOn } from "bun:test";
 import { withDom } from "../helpers/dom";
 
 withDom();
@@ -532,6 +532,72 @@ describe("shell App", () => {
         root.unmount();
       });
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("a malformed /nav response (nav is not an array) is logged and leaves nav items empty, without crashing the shell", async () => {
+    setInitialPath("/");
+    const restore = mockFetchSequence([
+      { path: "/me", status: 200, body: { id: "u1", roles: [], displayName: "Ada Lovelace", email: null } },
+      { path: "/routes", status: 200, body: { routes: [], contextOwners: {} } },
+      { path: "/nav", status: 200, body: { nav: "not-an-array" } },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+      await flush(act);
+
+      expect(container.querySelector("header")).not.toBeNull();
+      expect(container.querySelector("nav")?.children.length).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("a non-ok /nav response is logged and leaves nav items empty, without affecting the rest of the shell", async () => {
+    setInitialPath("/");
+    const restore = mockFetchSequence([
+      { path: "/me", status: 200, body: { id: "u1", roles: [], displayName: "Ada Lovelace", email: null } },
+      { path: "/routes", status: 200, body: { routes: [], contextOwners: {} } },
+      { path: "/nav", status: 502, body: { error: "scs fetch failed" } },
+    ]);
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App } = await import("../../src/frontend/shell-entry");
+
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+      });
+      await flush(act);
+
+      expect(container.textContent).toContain("Not found"); // rest of the shell still boots normally
+      expect(container.querySelector("nav")?.children.length).toBe(0);
+      expect(warnSpy.mock.calls.some((call) => String(call[0]).includes("502"))).toBe(true);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      restore();
+      warnSpy.mockRestore();
     }
   });
 });

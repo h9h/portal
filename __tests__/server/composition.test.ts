@@ -60,8 +60,23 @@ beforeEach(async () => {
             receivedBody,
             receivedContentType: req.headers.get("Content-Type"),
           }),
-          { status: 201, headers: { "Content-Type": "application/json" } }
+          { status: 201, headers: { "Content-Type": "application/json", Location: "/orders/123" } }
         );
+      }
+      if (url.pathname === "/orders/combo") {
+        receivedAuthHeader = req.headers.get("Authorization");
+        if (req.method === "GET") {
+          return new Response(JSON.stringify({ receivedMethod: "GET" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (req.method === "POST") {
+          return new Response(JSON.stringify({ receivedMethod: "POST" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
       }
       if (url.pathname === "/.portal/bundle.js") {
         return new Response("export const OrdersView = () => null;", {
@@ -243,12 +258,17 @@ describe("route composition", () => {
     expect(body.error).toBeTruthy();
   });
 
-  test("a request with a method the route doesn't declare returns 405, not 404", async () => {
+  // This user deliberately holds no role at all — if the method check ran
+  // after the role check, this would 403 instead of 405, silently proving
+  // to an unauthorized caller that the path exists. That ordering guarantee
+  // is exactly what this test protects: don't add assignRole() here.
+  test("a request with a method the route doesn't declare returns 405 (with an Allow header), not 404 or 403, even for a caller with no role at all", async () => {
     const response = await fetch(`${portal.url}orders`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     expect(response.status).toBe(405);
+    expect(response.headers.get("Allow")).toBe("GET");
   });
 
   test("the SCS fragment fetch does not follow redirects and returns a 502 instead", async () => {
@@ -653,6 +673,48 @@ describe("route composition: POST (mutations)", () => {
     expect(body.receivedBody).toBe(JSON.stringify({ item: "widget" }));
     expect(body.receivedContentType).toBe("application/json");
     expect(receivedAuthHeader).toMatch(/^Bearer /);
+    // The SCS's Location header (e.g. pointing at the created resource) is
+    // forwarded unmodified, the same as Content-Type already was.
+    expect(response.headers.get("Location")).toBe("/orders/123");
+  });
+
+  test("a POST with no Content-Type header still composes, forwarding no Content-Type to the SCS", async () => {
+    await addOrdersCreateRoute();
+    assignRole(db, userId, "orders:admin");
+
+    const response = await fetch(`${portal.url}orders/create`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+      body: JSON.stringify({ item: "widget" }),
+    });
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { receivedContentType: string | null };
+    expect(body.receivedContentType).toBeNull();
+  });
+
+  test("a route declaring methods: [\"GET\", \"POST\"] composes both verbs on the same path", async () => {
+    scsManifest = {
+      name: "orders",
+      routes: [{ path: "/orders/combo", requiredRoles: ["orders:admin"], methods: ["GET", "POST"] }],
+      nav: [],
+    };
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assignRole(db, userId, "orders:admin");
+
+    const getResponse = await fetch(`${portal.url}orders/combo`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+    });
+    expect(getResponse.status).toBe(200);
+    expect((await getResponse.json()).receivedMethod).toBe("GET");
+
+    const postResponse = await fetch(`${portal.url}orders/combo`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "X-Portal-Data": "1" },
+      body: "{}",
+    });
+    expect(postResponse.status).toBe(200);
+    expect((await postResponse.json()).receivedMethod).toBe("POST");
   });
 
   test("a POST to a route that only declares GET returns 405", async () => {

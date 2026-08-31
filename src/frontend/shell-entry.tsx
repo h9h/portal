@@ -109,16 +109,27 @@ export function App({ loadComponent = defaultLoader }: { loadComponent?: Compone
   // purposes until the next full page reload).
   useEffect(() => {
     if (me === undefined) return;
+    let cancelled = false;
     (async () => {
       try {
         const navResponse = await portalFetch("/nav");
-        if (!navResponse.ok) return;
-        const navJson = (await navResponse.json()) as { nav: NavItem[] };
-        setNavItems(navJson.nav);
+        if (!navResponse.ok) {
+          console.warn(`nav fetch returned ${navResponse.status}`);
+          return;
+        }
+        const navJson = (await navResponse.json()) as { nav: unknown };
+        if (!Array.isArray(navJson.nav)) {
+          console.warn("nav response had an unexpected shape", navJson);
+          return;
+        }
+        if (!cancelled) setNavItems(navJson.nav as NavItem[]);
       } catch (err) {
         console.error("nav fetch failed", err);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [me]);
 
   // Resolve + mount whenever the path (via usePortalNavigate/popstate) or the

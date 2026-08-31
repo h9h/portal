@@ -59,6 +59,23 @@ describe("parseManifest", () => {
     ).toBeNull();
   });
 
+  test("rejects a nav entry whose path isn't a same-origin absolute path", () => {
+    expect(
+      parseManifest({
+        name: "orders",
+        routes: [],
+        nav: [{ label: "Evil", path: "https://evil.example", requiredRoles: [] }],
+      })
+    ).toBeNull();
+    expect(
+      parseManifest({
+        name: "orders",
+        routes: [],
+        nav: [{ label: "Evil", path: "//evil.example", requiredRoles: [] }],
+      })
+    ).toBeNull();
+  });
+
   test("rejects a completely malformed payload", () => {
     expect(parseManifest("not-an-object")).toBeNull();
     expect(parseManifest(null)).toBeNull();

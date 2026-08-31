@@ -30,10 +30,10 @@ export type ServerOptions = {
   adminEmails?: string[];
 };
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...extraHeaders },
   });
 }
 
@@ -505,7 +505,7 @@ export function createServer(opts: ServerOptions = {}) {
         // not_found below, unchanged.
         const declaredRoute = index.routes.get(normalizedPath);
         if (declaredRoute && !declaredRoute.methods.includes(req.method)) {
-          return json({ error: "method not allowed" }, 405);
+          return json({ error: "method not allowed" }, 405, { Allow: declaredRoute.methods.join(", ") });
         }
 
         const userRoles = getUserRoles(db, userId);
@@ -519,7 +519,9 @@ export function createServer(opts: ServerOptions = {}) {
         }
 
         if (result.status === "allowed") {
-          const route = index.routes.get(normalizedPath)!;
+          // Already looked up above (as declaredRoute) to check the method —
+          // reuse it rather than querying the same snapshot a second time.
+          const route = declaredRoute!;
           const scsRoles = userRoles.filter(
             (role) => role.startsWith(`${route.scsName}:`) && !role.startsWith("portal:")
           );
@@ -527,14 +529,17 @@ export function createServer(opts: ServerOptions = {}) {
           // which is the only way to reach this branch.
           const internalToken = signInternalToken(userId, scsRoles, route.baseUrl, internalTokenSecret!);
           try {
-            const contentType = req.headers.get("Content-Type");
+            const proxyHeaders: Record<string, string> = { Authorization: `Bearer ${internalToken}` };
+            let proxyBody: BodyInit | undefined;
+            if (req.method === "POST") {
+              const contentType = req.headers.get("Content-Type");
+              if (contentType) proxyHeaders["Content-Type"] = contentType;
+              proxyBody = await req.arrayBuffer();
+            }
             const fragmentResponse = await fetch(`${route.baseUrl}${normalizedPath}${url.search}`, {
               method: req.method,
-              headers: {
-                Authorization: `Bearer ${internalToken}`,
-                ...(contentType ? { "Content-Type": contentType } : {}),
-              },
-              body: req.method === "POST" ? await req.arrayBuffer() : undefined,
+              headers: proxyHeaders,
+              body: proxyBody,
               redirect: "manual",
               signal: AbortSignal.timeout(10_000),
             });
@@ -543,11 +548,17 @@ export function createServer(opts: ServerOptions = {}) {
               return json({ error: "scs fetch failed" }, 502);
             }
             const body = await fragmentResponse.arrayBuffer();
+            const responseHeaders: Record<string, string> = {
+              "Content-Type": fragmentResponse.headers.get("Content-Type") ?? "application/octet-stream",
+            };
+            // Forwarded unmodified, same as the rest of the response — a
+            // mutation's canonical response (e.g. 201 Created) commonly
+            // carries a Location the caller needs.
+            const location = fragmentResponse.headers.get("Location");
+            if (location) responseHeaders.Location = location;
             return new Response(body, {
               status: fragmentResponse.status,
-              headers: {
-                "Content-Type": fragmentResponse.headers.get("Content-Type") ?? "application/octet-stream",
-              },
+              headers: responseHeaders,
             });
           } catch (err) {
             console.error("scs fragment fetch failed", err);

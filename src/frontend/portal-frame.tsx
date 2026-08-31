@@ -19,7 +19,7 @@ export type PortalFrameProps = {
   children: ReactNode;
 };
 
-const styles: Record<string, CSSProperties> = {
+const styles = {
   page: { display: "flex", flexDirection: "column", minHeight: "100vh" },
   header: {
     display: "flex",
@@ -34,7 +34,7 @@ const styles: Record<string, CSSProperties> = {
   authControls: { display: "flex", alignItems: "center", gap: "0.75rem" },
   main: { flex: 1, padding: "1.5rem" },
   footer: { padding: "1rem 1.5rem", borderTop: "1px solid #ddd", fontSize: "0.85rem", color: "#666" },
-};
+} satisfies Record<string, CSSProperties>;
 
 // Preserves normal <a> semantics (open in new tab, copy link, modifier-key
 // clicks) for anything but a plain left-click — the pattern specification.md's

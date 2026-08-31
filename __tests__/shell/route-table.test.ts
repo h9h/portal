@@ -4,12 +4,14 @@ import { buildRouteIndex } from "../../src/rights/route-access";
 import { buildContextIndex } from "../../src/rights/context-index";
 import type { ManifestEntry } from "../../src/scs/manifest-registry";
 
-function entry(name: string, opts: { routes?: any[]; publishesContext?: string[] } = {}): ManifestEntry {
+type RouteLiteral = { path: string; requiredRoles: string[]; component?: string; methods?: string[] };
+
+function entry(name: string, opts: { routes?: RouteLiteral[]; publishesContext?: string[] } = {}): ManifestEntry {
   return {
     baseUrl: `http://${name}.local`,
     manifest: {
       name,
-      routes: (opts.routes ?? []).map((route) => ({ methods: ["GET"], ...route })),
+      routes: (opts.routes ?? []).map((route) => ({ ...route, methods: route.methods ?? ["GET"] })),
       nav: [],
       publishesContext: opts.publishesContext ?? [],
       consumesContext: [],
