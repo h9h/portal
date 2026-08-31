@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-This repository is currently an empty scaffold: only `specification.md`, `bunfig.toml`, and this file exist. There is no `package.json`, no source directory, and no tests yet, and nothing has been committed to git. Do not assume any build/lint/test commands exist until `package.json` is created — check for one before running `bun install`/`bun test`/etc.
+Portal is under active implementation. `package.json` exists with `dev`, `start`, `start:prod`, `test`, and `typecheck` scripts (see `GETTING_STARTED.md` for setup, including registering a GitHub OAuth App and env var handling). Source lives under `src/`, organized by concern: `auth/` (OAuth2 login, tokens, refresh, users), `rights/` (roles, route access, nav composition), `runtime/` (shared cross-SCS frontend context and portalFetch), `shell/` (SPA shell bundling/bootstrap), `scs/` (self-contained-system manifest registry), and `server.ts` (the backend-for-frontend entrypoint). Tests live under `__tests__/`, mirroring that structure; run `bun test` (currently 322 passing tests) and `bun run typecheck` before considering any change done.
 
 ## Specification
 
@@ -23,6 +23,6 @@ Any functional extension beyond `specification.md` must be written into and appr
 
 ## bunfig.toml
 
-- Dev server: `https://localhost:3000` (HTTPS enabled).
+- Dev server: `http://localhost:3000` (plain HTTP; `[serve]` has no `https` setting — it only applies to Bun's built-in static-file dev server, not `src/server.ts`'s direct `Bun.serve()` call).
 - Tests: `bun:test`, environment `node`, test root `./__tests__`, coverage enabled, ignoring `vendor/**`, `submodules/**`, `fixtures/**`.
 

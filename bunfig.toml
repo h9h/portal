@@ -15,8 +15,6 @@ telemetry = false
   port = 3000
   # The hostname to serve on. Defaults to "localhost".
   hostname = "localhost"
-  # Whether to enable HTTPS. Defaults to false.
-  https = true
 
 [test]
   # The test framework to use. Defaults to "bun:test".
