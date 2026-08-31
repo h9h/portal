@@ -245,4 +245,52 @@ describe("createManifestRegistry", () => {
 
     expect(fetchCount).toBe(countAfterStartup);
   });
+
+  test("falls back to PORTAL_SCS_REFRESH_INTERVAL_MS when refreshIntervalMs isn't given", async () => {
+    const original = process.env.PORTAL_SCS_REFRESH_INTERVAL_MS;
+    process.env.PORTAL_SCS_REFRESH_INTERVAL_MS = "20";
+    try {
+      let fetchCount = 0;
+      const scs = startFakeScs(() => {
+        fetchCount++;
+        return new Response(JSON.stringify(validManifestJson), { status: 200 });
+      });
+
+      const registry = await createManifestRegistry([baseUrlOf(scs)]);
+      registries.push(registry);
+
+      const countAfterStartup = fetchCount;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+
+      expect(fetchCount).toBeGreaterThan(countAfterStartup);
+    } finally {
+      if (original === undefined) delete process.env.PORTAL_SCS_REFRESH_INTERVAL_MS;
+      else process.env.PORTAL_SCS_REFRESH_INTERVAL_MS = original;
+    }
+  });
+
+  test("an explicit refreshIntervalMs opt wins over PORTAL_SCS_REFRESH_INTERVAL_MS", async () => {
+    const original = process.env.PORTAL_SCS_REFRESH_INTERVAL_MS;
+    // An env value large enough that, if it were used instead of the opt
+    // below, no refresh would happen within this test's own wait window.
+    process.env.PORTAL_SCS_REFRESH_INTERVAL_MS = "100000";
+    try {
+      let fetchCount = 0;
+      const scs = startFakeScs(() => {
+        fetchCount++;
+        return new Response(JSON.stringify(validManifestJson), { status: 200 });
+      });
+
+      const registry = await createManifestRegistry([baseUrlOf(scs)], { refreshIntervalMs: 20 });
+      registries.push(registry);
+
+      const countAfterStartup = fetchCount;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+
+      expect(fetchCount).toBeGreaterThan(countAfterStartup);
+    } finally {
+      if (original === undefined) delete process.env.PORTAL_SCS_REFRESH_INTERVAL_MS;
+      else process.env.PORTAL_SCS_REFRESH_INTERVAL_MS = original;
+    }
+  });
 });

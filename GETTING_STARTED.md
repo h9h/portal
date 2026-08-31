@@ -161,6 +161,7 @@ Full list of variables Portal reads:
 | `PORTAL_BASE_URL` | No | Overrides the base URL used to build OAuth redirect/callback URIs. Defaults to the incoming request's own origin. Set this if Portal runs behind a reverse proxy or a different public hostname. |
 | `PORTAL_ADMIN_EMAILS` | No | Comma-separated list of emails auto-granted the `portal:admin` role on first login. Empty → no user is auto-promoted to admin. |
 | `PORTAL_SCS_URLS` | No | Comma-separated base URLs of registered self-contained systems. Empty → no manifest registry, so nav/route enforcement/SCS bundle loading are all disabled. |
+| `PORTAL_SCS_REFRESH_INTERVAL_MS` | No | How often Portal re-fetches every registered SCS's manifest, in milliseconds. Defaults to `60000` (one minute). Only read when `PORTAL_SCS_URLS` is set. |
 
 ## 4. Run the dev server
 

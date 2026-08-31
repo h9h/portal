@@ -8,6 +8,9 @@ export type ManifestEntry = {
 };
 
 export type ManifestRegistryOptions = {
+  // opts.refreshIntervalMs always wins (test injection); unset falls back to
+  // PORTAL_SCS_REFRESH_INTERVAL_MS, then a hardcoded default — the same
+  // opts-then-env precedence createServer's own options follow.
   refreshIntervalMs?: number;
   fetchFn?: typeof fetch;
   fetchTimeoutMs?: number;
@@ -32,7 +35,7 @@ export async function createManifestRegistry(
   opts: ManifestRegistryOptions = {}
 ): Promise<ManifestRegistry> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;
+  const refreshIntervalMs = opts.refreshIntervalMs ?? Number(process.env.PORTAL_SCS_REFRESH_INTERVAL_MS ?? 60_000);
   const fetchTimeoutMs = opts.fetchTimeoutMs ?? 10_000;
   const urls = [...new Set(baseUrls.map((u) => u.replace(/\/+$/, "")))];
   const entries = new Map<string, ManifestEntry>();
