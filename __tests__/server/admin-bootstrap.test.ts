@@ -45,9 +45,11 @@ afterAll(() => {
 async function login(portal: ReturnType<typeof createServer>) {
   const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
   const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+  const setCookie = loginResponse.headers.get("Set-Cookie")!;
+  const cookiePair = setCookie.split(";")[0];
   const callbackResponse = await fetch(
     `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
-    { redirect: "manual" }
+    { redirect: "manual", headers: { Cookie: cookiePair } }
   );
   const location = new URL(callbackResponse.headers.get("Location")!);
   const fragment = new URLSearchParams(location.hash.slice(1));

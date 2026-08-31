@@ -3,7 +3,7 @@ import { createDatabase } from "./db";
 import { findOrCreateUser, findUserById, listUsers } from "./auth/users";
 import { createRefreshToken, revokeRefreshToken, verifyAndRotateRefreshToken } from "./auth/refresh-tokens";
 import { signAccessToken } from "./auth/tokens";
-import { createState, verifyState } from "./auth/state";
+import { createState, verifyState, createStateCookie, readStateCookie, stateNonce } from "./auth/state";
 import { getProviders, type OAuthProviderConfig } from "./auth/providers";
 import { buildAuthorizeUrl, exchangeCodeForToken, fetchUserProfile } from "./auth/oauth-client";
 import { getAuthenticatedUserId } from "./auth/middleware";
@@ -71,6 +71,13 @@ export function createServer(opts: ServerOptions = {}) {
   const providers = opts.providers ?? getProviders();
   const accessTokenSecret = resolveSecret(opts.accessTokenSecret, "ACCESS_TOKEN_SECRET", "dev-secret-change-me");
   const stateSecret = resolveSecret(opts.stateSecret, "STATE_SECRET", "dev-state-secret-change-me");
+  const stateCookieSecure = process.env.NODE_ENV === "production";
+  if (!stateCookieSecure) {
+    console.warn(
+      'OAuth state cookie is not marked Secure (NODE_ENV is not "production") — fine for local HTTP ' +
+        "development, but a real deployment must run behind HTTPS."
+    );
+  }
   const configuredBaseUrl = (opts.baseUrl ?? process.env.PORTAL_BASE_URL)?.replace(/\/+$/, "");
   const adminEmails = opts.adminEmails ?? parseAdminEmails(process.env.PORTAL_ADMIN_EMAILS);
   if (adminEmails.length === 0) {
@@ -182,7 +189,13 @@ export function createServer(opts: ServerOptions = {}) {
         if (!provider) return json({ error: "unknown provider" }, 404);
         const state = createState(stateSecret);
         const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${loginMatch[1]}`;
-        return Response.redirect(buildAuthorizeUrl(provider, state, redirectUri), 302);
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: buildAuthorizeUrl(provider, state, redirectUri),
+            "Set-Cookie": createStateCookie(stateNonce(state)!, stateCookieSecure),
+          },
+        });
       }
 
       const callbackMatch = url.pathname.match(/^\/auth\/callback\/([^/]+)$/);
@@ -203,6 +216,11 @@ export function createServer(opts: ServerOptions = {}) {
           return Response.redirect(`${shellOrigin}/#error=oauth_failed`, 302);
         }
         if (!code || !state || !verifyState(state, stateSecret)) {
+          return json({ error: "invalid state or missing code" }, 400);
+        }
+        const nonce = stateNonce(state);
+        const cookieNonce = readStateCookie(req);
+        if (!nonce || !cookieNonce || cookieNonce !== nonce) {
           return json({ error: "invalid state or missing code" }, 400);
         }
         const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${providerName}`;

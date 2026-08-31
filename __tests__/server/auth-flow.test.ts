@@ -96,9 +96,11 @@ afterAll(() => {
 async function loginAndGetTokens() {
   const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
   const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+  const setCookie = loginResponse.headers.get("Set-Cookie")!;
+  const cookiePair = setCookie.split(";")[0];
   const callbackResponse = await fetch(
     `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
-    { redirect: "manual" }
+    { redirect: "manual", headers: { Cookie: cookiePair } }
   );
   const location = new URL(callbackResponse.headers.get("Location")!);
   const fragment = new URLSearchParams(location.hash.slice(1));
@@ -134,10 +136,11 @@ describe("full login flow", () => {
   test("callback with a valid code and state redirects to / with the token pair in the URL fragment", async () => {
     const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
     const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+    const cookiePair = loginResponse.headers.get("Set-Cookie")!.split(";")[0];
 
     const callbackResponse = await fetch(
       `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
-      { redirect: "manual" }
+      { redirect: "manual", headers: { Cookie: cookiePair } }
     );
     expect(callbackResponse.status).toBe(302);
     const location = new URL(callbackResponse.headers.get("Location")!);
@@ -151,6 +154,42 @@ describe("full login flow", () => {
   test("callback rejects an invalid state", async () => {
     const response = await fetch(`${portal.url}auth/callback/fake?code=valid-code&state=garbage`);
     expect(response.status).toBe(400);
+  });
+
+  test("login sets an HttpOnly state cookie", async () => {
+    const response = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
+    const setCookie = response.headers.get("Set-Cookie");
+    expect(setCookie).toBeTruthy();
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Lax");
+    expect(setCookie).toContain("Path=/auth/callback");
+  });
+
+  test("callback fails when no cookie is sent at all", async () => {
+    const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
+    const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+
+    const callbackResponse = await fetch(
+      `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
+      { redirect: "manual" }
+    );
+    expect(callbackResponse.status).toBe(400);
+  });
+
+  test("callback fails when the cookie doesn't match the state's nonce (the actual CSRF scenario)", async () => {
+    // Simulates an attacker capturing a state+code pair from their own real
+    // login flow and getting a victim to load the callback URL: the
+    // victim's browser never received the attacker's state cookie, so a
+    // mismatched (or absent-for-this-state) cookie must be rejected even
+    // though the state's own signature is valid.
+    const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
+    const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+
+    const callbackResponse = await fetch(
+      `${portal.url}auth/callback/fake?code=valid-code&state=${encodeURIComponent(state)}`,
+      { redirect: "manual", headers: { Cookie: "portal_oauth_state=wrong-nonce-value" } }
+    );
+    expect(callbackResponse.status).toBe(400);
   });
 
   test("callback with a provider error (e.g. a cancelled sign-in) redirects to the shell's error screen", async () => {
@@ -306,10 +345,11 @@ describe("full login flow", () => {
   test("callback with a bad code redirects to the shell with an error, not a crash", async () => {
     const loginResponse = await fetch(`${portal.url}auth/login/fake`, { redirect: "manual" });
     const state = new URL(loginResponse.headers.get("Location")!).searchParams.get("state")!;
+    const cookiePair = loginResponse.headers.get("Set-Cookie")!.split(";")[0];
 
     const callbackResponse = await fetch(
       `${portal.url}auth/callback/fake?code=wrong-code&state=${encodeURIComponent(state)}`,
-      { redirect: "manual" }
+      { redirect: "manual", headers: { Cookie: cookiePair } }
     );
     expect(callbackResponse.status).toBe(302);
     const location = new URL(callbackResponse.headers.get("Location")!);
