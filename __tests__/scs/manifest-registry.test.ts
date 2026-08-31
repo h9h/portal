@@ -3,7 +3,7 @@ import { createManifestRegistry, parseScsBaseUrls } from "../../src/scs/manifest
 
 const validManifestJson = {
   name: "orders",
-  routes: [{ path: "/orders", requiredRoles: ["orders:viewer"] }],
+  routes: [{ path: "/orders", requiredRoles: ["orders:viewer"], methods: ["GET"] }],
   nav: [{ label: "Orders", path: "/orders", requiredRoles: ["orders:viewer"] }],
   publishesContext: [] as string[],
   consumesContext: [] as string[],

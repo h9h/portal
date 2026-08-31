@@ -10,7 +10,7 @@ describe("parseManifest", () => {
     });
     expect(manifest).toEqual({
       name: "orders",
-      routes: [{ path: "/orders", requiredRoles: ["orders:viewer"] }],
+      routes: [{ path: "/orders", requiredRoles: ["orders:viewer"], methods: ["GET"] }],
       nav: [{ label: "Orders", path: "/orders", requiredRoles: ["orders:viewer"] }],
       publishesContext: [],
       consumesContext: [],
@@ -94,7 +94,7 @@ describe("route component field", () => {
       routes: [{ path: "/orders", requiredRoles: [], component: "OrdersView" }],
       nav: [],
     });
-    expect(manifest?.routes[0]).toEqual({ path: "/orders", requiredRoles: [], component: "OrdersView" });
+    expect(manifest?.routes[0]).toEqual({ path: "/orders", requiredRoles: [], methods: ["GET"], component: "OrdersView" });
   });
 
   test("omits component when absent (data-only route)", () => {
@@ -103,7 +103,7 @@ describe("route component field", () => {
       routes: [{ path: "/orders/summary", requiredRoles: [] }],
       nav: [],
     });
-    expect(manifest?.routes[0]).toEqual({ path: "/orders/summary", requiredRoles: [] });
+    expect(manifest?.routes[0]).toEqual({ path: "/orders/summary", requiredRoles: [], methods: ["GET"] });
     expect(manifest?.routes[0].component).toBeUndefined();
   });
 
@@ -111,6 +111,76 @@ describe("route component field", () => {
     expect(
       parseManifest({ name: "orders", routes: [{ path: "/orders", requiredRoles: [], component: 42 }], nav: [] })
     ).toBeNull();
+  });
+});
+
+describe("methods field", () => {
+  test('defaults to ["GET"] when absent', () => {
+    const manifest = parseManifest({ name: "orders", routes: [{ path: "/orders", requiredRoles: [] }], nav: [] });
+    expect(manifest?.routes[0].methods).toEqual(["GET"]);
+  });
+
+  test("accepts an explicit methods list", () => {
+    const manifest = parseManifest({
+      name: "orders",
+      routes: [{ path: "/orders/create", requiredRoles: ["orders:editor"], methods: ["POST"] }],
+      nav: [],
+    });
+    expect(manifest?.routes[0].methods).toEqual(["POST"]);
+  });
+
+  test("accepts a route declaring both GET and POST", () => {
+    const manifest = parseManifest({
+      name: "orders",
+      routes: [{ path: "/orders", requiredRoles: [], methods: ["GET", "POST"], component: "OrdersView" }],
+      nav: [],
+    });
+    expect(manifest?.routes[0].methods).toEqual(["GET", "POST"]);
+  });
+
+  test("rejects a non-string-array methods field", () => {
+    expect(
+      parseManifest({ name: "orders", routes: [{ path: "/orders", requiredRoles: [], methods: "GET" }], nav: [] })
+    ).toBeNull();
+  });
+
+  test("rejects an empty methods array", () => {
+    expect(
+      parseManifest({ name: "orders", routes: [{ path: "/orders", requiredRoles: [], methods: [] }], nav: [] })
+    ).toBeNull();
+  });
+
+  test("rejects a method outside GET/POST", () => {
+    expect(
+      parseManifest({
+        name: "orders",
+        routes: [{ path: "/orders", requiredRoles: [], methods: ["DELETE"] }],
+        nav: [],
+      })
+    ).toBeNull();
+  });
+
+  test("rejects a component on a route that doesn't declare GET", () => {
+    expect(
+      parseManifest({
+        name: "orders",
+        routes: [{ path: "/orders", requiredRoles: [], methods: ["POST"], component: "OrdersView" }],
+        nav: [],
+      })
+    ).toBeNull();
+  });
+
+  test("accepts a POST-only route without a component (pure mutation endpoint)", () => {
+    const manifest = parseManifest({
+      name: "orders",
+      routes: [{ path: "/orders/create", requiredRoles: ["orders:editor"], methods: ["POST"] }],
+      nav: [],
+    });
+    expect(manifest?.routes[0]).toEqual({
+      path: "/orders/create",
+      requiredRoles: ["orders:editor"],
+      methods: ["POST"],
+    });
   });
 });
 

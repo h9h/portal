@@ -1,8 +1,11 @@
 export type RouteEntry = {
   path: string;
   requiredRoles: string[];
+  methods: string[];
   component?: string;
 };
+
+const ALLOWED_METHODS = new Set(["GET", "POST"]);
 
 export type NavEntry = {
   label: string;
@@ -28,9 +31,22 @@ function parseRouteEntry(value: unknown): RouteEntry | null {
   const obj = value as Record<string, unknown>;
   if (typeof obj.path !== "string" || !isStringArray(obj.requiredRoles)) return null;
   if (obj.component !== undefined && typeof obj.component !== "string") return null;
+
+  let methods = ["GET"];
+  if (obj.methods !== undefined) {
+    if (!isStringArray(obj.methods) || obj.methods.length === 0) return null;
+    if (!obj.methods.every((method) => ALLOWED_METHODS.has(method))) return null;
+    methods = obj.methods;
+  }
+  // A route with a component is meant to be mounted as a page, and a page is
+  // only ever reached via a real browser GET navigation — a route that can't
+  // answer GET could never be navigated to.
+  if (typeof obj.component === "string" && !methods.includes("GET")) return null;
+
   return {
     path: obj.path,
     requiredRoles: obj.requiredRoles,
+    methods,
     ...(typeof obj.component === "string" ? { component: obj.component } : {}),
   };
 }
