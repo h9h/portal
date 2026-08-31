@@ -5,7 +5,28 @@ import { resolveRoute, type RouteTableEntry } from "./router";
 
 export type ComponentLoader = (bundleUrl: string) => Promise<Record<string, unknown>>;
 
-const defaultLoader: ComponentLoader = (bundleUrl) => import(/* @vite-ignore */ bundleUrl);
+// A browser's dynamic `import()` can't attach an `Authorization` header, and
+// GET /_scs/:scsName/bundle.js requires one (see specification.md, Client
+// shell). So this doesn't `import()` the network URL directly — it fetches
+// the bundle via `portalFetch` (which does attach the header, and
+// transparently refreshes-and-retries on a stale token) and mounts the
+// resulting source from a same-origin `blob:` URL, which dynamic `import()`
+// can load with no network request/headers of its own. The blob URL is
+// revoked as soon as the import settles (success or failure) — it only ever
+// needs to exist long enough for that one `import()` call.
+export const defaultLoader: ComponentLoader = async (bundleUrl) => {
+  const response = await portalFetch(bundleUrl);
+  if (!response.ok) {
+    throw new Error(`failed to load SCS bundle ${bundleUrl}: ${response.status}`);
+  }
+  const code = await response.text();
+  const blobUrl = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  try {
+    return await import(/* @vite-ignore */ blobUrl);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+};
 
 type Me = { id: string; roles: string[] } | null;
 type RoutesResponse = { routes: RouteTableEntry[]; contextOwners: Record<string, string> };

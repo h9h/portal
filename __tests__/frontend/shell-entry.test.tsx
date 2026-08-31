@@ -404,3 +404,90 @@ describe("shell App", () => {
     }
   });
 });
+
+describe("defaultLoader", () => {
+  // Every test above injects its own `loadComponent` mock, so none of them
+  // ever exercises the real default. This is the one code path in this file
+  // with no coverage of its own — it needs a real fetch mock and a real
+  // dynamic import() of a real blob: URL under happy-dom.
+  test("fetches the bundle via portalFetch (carrying the X-Portal-Data marker header) and mounts it from a blob: URL, yielding a module with usable named exports", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: { url: string; headers: Headers }[] = [];
+    globalThis.fetch = mock(async (input: any, init?: RequestInit) => {
+      calls.push({ url: String(input), headers: new Headers(init?.headers) });
+      return new Response("export const Probe = () => null;", {
+        status: 200,
+        headers: { "Content-Type": "application/javascript" },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const { defaultLoader } = await import("../../src/frontend/shell-entry");
+      const module = await defaultLoader("/_scs/orders/bundle.js");
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe("/_scs/orders/bundle.js");
+      expect(calls[0].headers.get("X-Portal-Data")).toBe("1");
+
+      expect(typeof module.Probe).toBe("function");
+      expect((module.Probe as () => null)()).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("throws a clear error (not a cryptic parse failure) when the underlying fetch is non-ok, and the App component's existing catch turns that into the error state", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mock(async () => new Response("unauthorized", { status: 401 })) as unknown as typeof fetch;
+
+    try {
+      const { defaultLoader } = await import("../../src/frontend/shell-entry");
+      await expect(defaultLoader("/_scs/orders/bundle.js")).rejects.toThrow(
+        "failed to load SCS bundle /_scs/orders/bundle.js: 401"
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("composes with App: a non-ok bundle fetch surfaces as the App component's error state", async () => {
+    setInitialPath("/orders");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mock(async (input: any) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/me") return new Response(JSON.stringify({ id: "u1", roles: ["orders:viewer"] }), { status: 200 });
+      if (url.pathname === "/routes") {
+        return new Response(
+          JSON.stringify({
+            routes: [{ path: "/orders", scsName: "orders", requiredRoles: ["orders:viewer"], component: "OrdersView" }],
+            contextOwners: {},
+          }),
+          { status: 200 }
+        );
+      }
+      if (url.pathname === "/_scs/orders/bundle.js") return new Response("bad gateway", { status: 502 });
+      return new Response("not mocked", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { App, defaultLoader } = await import("../../src/frontend/shell-entry");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App loadComponent={defaultLoader} />);
+      });
+      await flush(act);
+
+      expect(container.textContent).toContain("Something went wrong");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
