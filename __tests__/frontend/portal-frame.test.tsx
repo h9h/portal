@@ -1,0 +1,274 @@
+import { describe, test, expect } from "bun:test";
+import { withDom } from "../helpers/dom";
+
+withDom();
+
+function setInitialPath(path: string): void {
+  (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL("https://localhost:3000/");
+  history.pushState(null, "", path);
+}
+
+function click(element: Element): void {
+  element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+}
+
+describe("PortalFrame", () => {
+  test("renders a placeholder logo linking to /, and clicking it navigates there client-side", async () => {
+    setInitialPath("/somewhere");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <PortalFrame me={undefined} providers={[]} navItems={[]}>
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+
+      const logoLink = container.querySelector('a[href="/"]') as HTMLAnchorElement | null;
+      expect(logoLink).not.toBeNull();
+      expect(logoLink!.querySelector("svg")).not.toBeNull();
+
+      await act(async () => {
+        click(logoLink!);
+      });
+      expect(window.location.pathname).toBe("/");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  test("renders one nav link per item keyed by domain+path, and clicking one navigates client-side", async () => {
+    setInitialPath("/");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <PortalFrame
+            me={undefined}
+            providers={[]}
+            navItems={[
+              { label: "Orders", path: "/orders", domain: "orders" },
+              { label: "Billing", path: "/billing", domain: "billing" },
+            ]}
+          >
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+
+      expect(container.textContent).toContain("Orders");
+      expect(container.textContent).toContain("Billing");
+
+      const ordersLink = container.querySelector('a[href="/orders"]') as HTMLAnchorElement | null;
+      expect(ordersLink).not.toBeNull();
+
+      await act(async () => {
+        click(ordersLink!);
+      });
+      expect(window.location.pathname).toBe("/orders");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  test("me: undefined (identity still resolving) shows no auth controls", async () => {
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <PortalFrame me={undefined} providers={[{ name: "github", label: "GitHub" }]} navItems={[]}>
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+
+      expect(container.textContent).not.toContain("Sign in");
+      expect(container.textContent).not.toContain("Logout");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  test("me: null (anonymous) shows one sign-in link per provider", async () => {
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <PortalFrame
+            me={null}
+            providers={[
+              { name: "github", label: "GitHub" },
+              { name: "gitlab", label: "GitLab" },
+            ]}
+            navItems={[]}
+          >
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+
+      const githubLink = container.querySelector('a[href="/auth/login/github"]');
+      const gitlabLink = container.querySelector('a[href="/auth/login/gitlab"]');
+      expect(githubLink).not.toBeNull();
+      expect(gitlabLink).not.toBeNull();
+      expect(container.textContent).toContain("GitHub");
+      expect(container.textContent).toContain("GitLab");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  test("an authenticated user sees their displayName as a /profile link, and a Logout button", async () => {
+    setInitialPath("/");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <PortalFrame
+            me={{ id: "u1", roles: [], displayName: "Ada Lovelace", email: "ada@example.com" }}
+            providers={[]}
+            navItems={[]}
+          >
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+
+      expect(container.textContent).toContain("Ada Lovelace");
+      const profileLink = container.querySelector('a[href="/profile"]') as HTMLAnchorElement | null;
+      expect(profileLink).not.toBeNull();
+      const logoutButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Logout");
+      expect(logoutButton).toBeDefined();
+
+      await act(async () => {
+        click(profileLink!);
+      });
+      expect(window.location.pathname).toBe("/profile");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  test("falls back to email, then id, when displayName is missing", async () => {
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    async function renderWith(me: { id: string; roles: string[]; displayName: string | null; email: string | null }) {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <PortalFrame me={me} providers={[]} navItems={[]}>
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+      return { container, root };
+    }
+
+    const { container: c1, root: r1 } = await renderWith({
+      id: "u1",
+      roles: [],
+      displayName: null,
+      email: "ada@example.com",
+    });
+    expect(c1.textContent).toContain("ada@example.com");
+    await act(async () => {
+      r1.unmount();
+    });
+
+    const { container: c2, root: r2 } = await renderWith({ id: "u2", roles: [], displayName: null, email: null });
+    expect(c2.textContent).toContain("u2");
+    await act(async () => {
+      r2.unmount();
+    });
+  });
+
+  test("clicking Logout clears the session and navigates to /", async () => {
+    const { storeTokens, getStoredTokens } = await import("../../src/runtime/auth");
+    storeTokens({ accessToken: "a.b.c", refreshToken: "refresh-1" });
+
+    const originalFetch = globalThis.fetch;
+    const originalAssign = window.location.assign;
+    let assignedTo = "";
+    globalThis.fetch = (async () => new Response(JSON.stringify({ status: "ok" }), { status: 200 })) as unknown as typeof fetch;
+    (window.location as unknown as { assign: (url: string) => void }).assign = (url: string) => {
+      assignedTo = url;
+    };
+
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { PortalFrame } = await import("../../src/frontend/portal-frame");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <PortalFrame me={{ id: "u1", roles: [], displayName: "Ada Lovelace", email: null }} providers={[]} navItems={[]}>
+            <div>content</div>
+          </PortalFrame>
+        );
+      });
+
+      const logoutButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Logout")!;
+      await act(async () => {
+        logoutButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+      });
+
+      expect(getStoredTokens()).toBeNull();
+      expect(assignedTo).toBe("/");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      globalThis.fetch = originalFetch;
+      window.location.assign = originalAssign;
+      sessionStorage.clear();
+    }
+  });
+});
