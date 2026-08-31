@@ -2,9 +2,25 @@ import { Component, useEffect, useState, type ReactNode } from "react";
 import { PortalRuntimeProvider, portalFetch, useCurrentPath } from "@portal/runtime";
 import { storeTokens } from "../runtime/auth";
 import { resolveRoute, type RouteTableEntry } from "./router";
-import { PortalFrame, type Me, type Provider, type NavItem } from "./portal-frame";
+import { PortalFrame } from "./portal-frame";
 
 export type ComponentLoader = (bundleUrl: string) => Promise<Record<string, unknown>>;
+
+// Owned here, not in portal-frame.tsx: this is the component that fetches
+// /me, /routes, and /nav and holds the resulting state, so it's the one that
+// decides these types' shape from the API responses. PortalFrame is a
+// presentational consumer of that already-fetched state — it imports these
+// types rather than defining them (see portal-frame.tsx).
+export type Me = {
+  id: string;
+  roles: string[];
+  displayName: string | null;
+  email: string | null;
+} | null;
+
+export type Provider = { name: string; label: string };
+
+export type NavItem = { label: string; path: string; domain: string };
 
 // A browser's dynamic `import()` can't attach an `Authorization` header, and
 // GET /_scs/:scsName/bundle.js requires one (see specification.md, Client

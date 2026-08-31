@@ -1,16 +1,10 @@
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { usePortalNavigate, usePortalLogout } from "@portal/runtime";
-
-export type Me = {
-  id: string;
-  roles: string[];
-  displayName: string | null;
-  email: string | null;
-} | null;
-
-export type Provider = { name: string; label: string };
-
-export type NavItem = { label: string; path: string; domain: string };
+// Me/Provider/NavItem are owned by shell-entry.tsx: it's the component that
+// actually fetches /me, /routes, and /nav and decides their shape from the
+// API responses — PortalFrame is just the presentational consumer of that
+// already-fetched state, so it imports the types rather than defining them.
+import type { Me, Provider, NavItem } from "./shell-entry";
 
 export type PortalFrameProps = {
   me: Me | undefined;
