@@ -220,8 +220,17 @@ export function createServer(opts: ServerOptions = {}) {
         }
         const nonce = stateNonce(state);
         const cookieNonce = readStateCookie(req);
+        // Unlike the signature check above (genuinely malformed/forged — no
+        // legitimate flow ever produces it), a cookie mismatch also fires for
+        // an ordinary user: a second /auth/login in another tab overwrites
+        // the one state cookie, so finishing the first tab's flow afterward
+        // looks identical to a captured-state replay from the server's point
+        // of view. Both are rejected the same way (the server genuinely can't
+        // tell them apart), but a real user deserves the shell's error screen
+        // here, not raw JSON with no way back — the same reasoning already
+        // applied above for a cancelled sign-in.
         if (!nonce || !cookieNonce || cookieNonce !== nonce) {
-          return json({ error: "invalid state or missing code" }, 400);
+          return Response.redirect(`${shellOrigin}/#error=oauth_failed`, 302);
         }
         const redirectUri = `${configuredBaseUrl ?? url.origin}/auth/callback/${providerName}`;
         try {
